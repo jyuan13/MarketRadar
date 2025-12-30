@@ -441,21 +441,13 @@ def send_email(subject, body, attachment_files):
         print(f"❌ 邮件发送失败: {e}")
 
 
-def generate_report():
-    # === 新增：酷炫的启动 Banner ===
-    print(r"""
-  __  __            _        _   ____          _            
- |  \/  | __ _ _ __| | _____| |_|  _ \ __ _ __| | __ _ _ __ 
- | |\/| |/ _` | '__| |/ / _ \ __| |_) / _` / _` |/ _` | '__|
- | |  | | (_| | |  |   <  __/ |_|  _ < (_| (_| | (_| | |   
- |_|  |_|\__,_|_|  |_|\_\___|\__|_| \_\__,_\__,_|\__,_|_|   
-                                                            
-    """)
-    print("=========================================")
-    print(f"📅 多市场数据采集器 (MarketRadar - GitHub Actions Ready)")
+def get_all_kline_data():
+    """
+    对外接口函数：执行所有K线抓取任务并返回字典
+    """
+    print(f"📅 多市场数据采集器 (MarketRadar - Module)")
     print(f"🕒 时间段: {START_DATE} 至 {END_DATE}")
-    print("=========================================\n")
-
+    
     fetcher = MarketFetcher()
     
     # 汇总所有数据到一个大字典
@@ -483,35 +475,15 @@ def generate_report():
     # 5. 抓取港股创新药
     all_data_collection["data"]["港股创新药"] = fetch_group_data(fetcher, TARGETS_HK_PHARMA, "港股创新药")
     
-    print("\n🎉 所有数据抓取任务处理完成！正在合并写入文件...")
-
-    # === 合并写入到一个 JSON 文件 ===
-    output_filename = "金融数据.json"
-    try:
-        with open(output_filename, 'w', encoding='utf-8') as f:
-            json.dump(all_data_collection, f, ensure_ascii=False, indent=4)
-        print(f"✅ 成功! 所有数据已合并写入 {output_filename}。")
-    except Exception as e:
-        print(f"❌ 写入合并 JSON 失败: {e}")
-    
-    # === 发送邮件逻辑 ===
-    generated_files = [output_filename]
-    
-    email_subject = f"全球市场K线数据报告_{datetime.now().strftime('%Y-%m-%d')}"
-    email_body = f"""
-    您好，
-    
-    这是今天的全量市场 K 线数据（已合并）。
-    生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-    数据范围: {START_DATE} 至 {END_DATE}
-    
-    附件列表:
-    {', '.join(generated_files)}
-    
-    请查收。
-    """
-    
-    send_email(email_subject, email_body, generated_files)
+    print("\n🎉 K线数据抓取任务处理完成！")
+    return all_data_collection
 
 if __name__ == "__main__":
-    generate_report()
+    # 如果直接运行此脚本，执行默认逻辑并保存文件
+    data = get_all_kline_data()
+    
+    output_filename = "金融数据.json"
+    with open(output_filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+        
+    print(f"✅ 数据已保存至 {output_filename}")

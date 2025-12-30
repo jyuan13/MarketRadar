@@ -469,6 +469,7 @@ def get_manual_fallback(category, indicator):
     return []
 
 def get_data_main():
+    """对外接口：获取所有宏观经济与市场数据"""
     end_date_dt = datetime.datetime.now()
     start_date_dt = end_date_dt - datetime.timedelta(days=185)
     start_date_str = start_date_dt.strftime("%Y-%m-%d")
@@ -620,7 +621,7 @@ def get_data_main():
 
     return data_store
 
-def main():
+if __name__ == "__main__":
     try:
         data = get_data_main()
     except Exception as e:
@@ -633,6 +634,3 @@ def main():
         print(f"\n全部完成！数据已保存至 {output_file}")
     except Exception as e:
         print(f"保存失败: {e}")
-
-if __name__ == "__main__":
-    main()
