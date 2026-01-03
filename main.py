@@ -5,6 +5,7 @@ import time
 import math
 import pandas as pd  # 新增: 用于数据处理
 from datetime import datetime
+from zoneinfo import ZoneInfo  # 新增: 时区处理
 
 # -----------------------------------------------------------------------------
 # 路径兼容处理：确保能导入上层或同级模块
@@ -28,6 +29,9 @@ except ImportError:
 # 输出文件名称
 OUTPUT_FILENAME = "MarketRadar_Report.json"
 LOG_FILENAME = "market_data_status.txt"
+
+# 定义北京时区
+TZ_CN = ZoneInfo("Asia/Shanghai")
 
 def print_banner():
     print(r"""
@@ -87,7 +91,8 @@ def merge_final_report(macro_data_combined, kline_data_dict, ma_data_list):
         "market_klines": kline_data_dict.get("data", {})
     }
     
-    merged["meta"]["generated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 强制更新 meta 时间为当前北京时间
+    merged["meta"]["generated_at"] = datetime.now(TZ_CN).strftime("%Y-%m-%d %H:%M:%S")
     merged["meta"]["description"] = "MarketRadar Consolidated Report (Selenium Macro + Online FX + Klines)"
     
     return merged
@@ -139,12 +144,13 @@ def write_status_log(logs, filename):
     """
     try:
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write(f"MarketRadar Data Fetch Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"MarketRadar Data Fetch Log - {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("="*60 + "\n")
             
             for log in logs:
                 status_str = "[PASS]" if log['status'] else "[FAIL]"
-                timestamp = datetime.now().strftime('%H:%M:%S')
+                # 日志条目时间也使用北京时间
+                timestamp = datetime.now(TZ_CN).strftime('%H:%M:%S')
                 line = f"[{timestamp}] {status_str} {log['name']}"
                 if not log['status'] and log['error']:
                     line += f" | Error: {log['error']}"
@@ -231,6 +237,7 @@ def main():
             if "data" not in kline_data_dict or kline_data_dict["data"] is None:
                 kline_data_dict["data"] = {}
                 
+            # [重要] 确保数据结构与主程序一致
             kline_data_dict["data"]["越南胡志明指数"] = vni_data
             
             # --- 计算越南指数均线 ---
@@ -274,10 +281,11 @@ def main():
     if save_compact_json(final_data, OUTPUT_FILENAME):
         # 邮件逻辑
         try:
-            email_subject = f"MarketRadar全量日报_{datetime.now().strftime('%Y-%m-%d')}"
+            # 邮件主题使用北京时间
+            email_subject = f"MarketRadar全量日报_{datetime.now(TZ_CN).strftime('%Y-%m-%d')}"
             
-            # 构建正文
-            base_body = f"生成时间: {datetime.now()}\n包含: 宏观(Selenium), 汇率/国债(Online), K线(Stock/VNI)\n\n"
+            # 构建正文 (使用北京时间)
+            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观(Selenium), 汇率/国债(Online), K线(Stock/VNI)\n\n"
             status_body = generate_email_body_summary(all_status_logs)
             email_body = base_body + status_body
             

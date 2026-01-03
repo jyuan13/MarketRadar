@@ -5,6 +5,7 @@ import yfinance as yf
 import requests
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo  # 新增: 时区处理
 import logging
 import warnings
 import socket
@@ -57,13 +58,16 @@ RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL")
 if not SENDER_EMAIL:
     print("⚠️ 警告: 未设置 SENDER_EMAIL 环境变量，邮件发送功能可能受限。")
 
-# --- 数据查询时间段 ---
-# REPORT_START_DATE: 报告中K线展示的起始时间 (动态设置：过去45天)
-REPORT_START_DATE = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d")
+# --- 数据查询时间段 (强制北京时间) ---
+TZ_CN = ZoneInfo("Asia/Shanghai")
+NOW_CN = datetime.now(TZ_CN)
+
+# REPORT_START_DATE: 报告中K线展示的起始时间 (动态设置：过去20天)
+REPORT_START_DATE = (NOW_CN - timedelta(days=20)).strftime("%Y-%m-%d")
 
 # FETCH_START_DATE: API 实际拉取的起始时间 (回溯500天，确保能计算 MA250 年线)
-FETCH_START_DATE = (datetime.now() - timedelta(days=500)).strftime("%Y-%m-%d")
-END_DATE = datetime.now().strftime("%Y-%m-%d")
+FETCH_START_DATE = (NOW_CN - timedelta(days=500)).strftime("%Y-%m-%d")
+END_DATE = NOW_CN.strftime("%Y-%m-%d")
 
 # ------------------------------------------------
 # 任务组 1: 全球市场 (指数.json)
@@ -73,7 +77,8 @@ TARGETS_GLOBAL = {
     "标普500":      {"ak": ".INX",    "yf": "^GSPC",    "type": "index_us"},
     "恒生科技":     {"ak": "HSTECH",  "yf": "^HSTECH",  "type": "index_hk"},
     "恒生指数":     {"ak": "HSI",     "yf": "^HSI",     "type": "index_hk"},
-    "越南胡志明指数": {"ak": None,      "yf": "^VNINDEX", "type": "index_global"}, 
+    # [修改] 移除越南胡志明指数，交由 Step 4 的 fetch_data 爬虫专门处理，避免 YFinance 报错
+    # "越南胡志明指数": {"ak": None,      "yf": "^VNINDEX", "type": "index_global"}, 
     "黄金(COMEX)":  {"ak": "GC",      "yf": "GC=F",     "type": "future_foreign"},  
     "白银(COMEX)":  {"ak": "SI",      "yf": "SI=F",     "type": "future_foreign"},  
     "铜(COMEX)":    {"ak": "HG",      "yf": "HG=F",     "type": "future_foreign"}, 
@@ -495,10 +500,10 @@ def get_all_kline_data():
     
     fetcher = MarketFetcher()
     
-    # 汇总所有数据到一个大字典
+    # 汇总所有数据到一个大字典 (使用北京时间)
     all_data_collection = {
         "meta": {
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "generated_at": datetime.now(TZ_CN).strftime("%Y-%m-%d %H:%M:%S"),
             "date_range": f"{REPORT_START_DATE} to {END_DATE}",
             "description": "Global Market Data Consolidated Report"
         },

@@ -17,6 +17,7 @@ import warnings
 from io import StringIO
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from zoneinfo import ZoneInfo  # 新增: 时区处理
 
 warnings.filterwarnings("ignore")
 
@@ -25,6 +26,7 @@ warnings.filterwarnings("ignore")
 # ==============================================================================
 
 ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "DEMO")
+TZ_CN = ZoneInfo("Asia/Shanghai") # 定义北京时区
 
 def get_retry_session(retries=5):
     session = requests.Session()
@@ -221,8 +223,8 @@ def fetch_japan_bond_yields():
         if not found_data:
             return [], "Targets (2Y/10Y/30Y) not found in any table"
 
-        # 构造返回结果 (单条记录包含多个期限)
-        current_date = datetime.datetime.now().strftime('%Y-%m-%d')
+        # 构造返回结果 (单条记录包含多个期限, 强制使用北京时间)
+        current_date = datetime.datetime.now(TZ_CN).strftime('%Y-%m-%d')
         result_row = {"日期": current_date}
         result_row.update(found_data)
         
