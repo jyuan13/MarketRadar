@@ -1,17 +1,11 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 """
-数据获取脚本 (离线优先版 + 多源备用)
-功能：获取全球主要经济体的宏观经济数据、汇率、债券及市场指数。
-核心特性：
-1. [优先级] 优先读取 manual_data.json，若存在则跳过在线获取。
-2. [多源] 引入 Alpha Vantage 作为美股/宏观数据的备用源。
-3. [清洗] 所有数值强制保留两位小数。
-4. [增强] 强制去除同一日期的重复数据，保留最新记录。
-5. [统一] 中美日国债数据结构统一为宽表格式。
+数据获取脚本 (精简版 - 负责 FX、国债及新增的越南指数)
+功能：在线获取全球汇率、VIX、中/美/日国债收益率以及越南胡志明指数K线。
+注意：宏观经济指标(CPI/PPI等)已移交 scrape_economy_selenium.py 处理。
 """
 
-import json
 import datetime
 import time
 import os
@@ -20,659 +14,401 @@ import yfinance as yf
 import akshare as ak
 import requests
 import warnings
+from io import StringIO
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# 强力屏蔽 Pandas 和 Dateutil 的特定警告
-warnings.filterwarnings("ignore", category=UserWarning, module="pandas")
-warnings.filterwarnings("ignore", message=".*Could not infer format.*")
+warnings.filterwarnings("ignore")
 
 # ==============================================================================
-# 全局配置与工具函数
+# 配置与工具
 # ==============================================================================
 
-MANUAL_DATA_FILE = "manual_data.json"
-ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "DEMO") # 请确保环境变量设置
+ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "DEMO")
 
-def get_retry_session(retries=3, backoff_factor=1, status_forcelist=(500, 502, 503, 504)):
-    """创建一个带有自动重试功能的 Requests Session"""
+def get_retry_session(retries=3):
     session = requests.Session()
-    retry = Retry(
-        total=retries,
-        read=retries,
-        connect=retries,
-        backoff_factor=backoff_factor,
-        status_forcelist=status_forcelist,
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
+    # 模拟浏览器 Header，防止 Investing.com 403
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    })
+    retry = Retry(total=retries, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+    session.mount('http://', HTTPAdapter(max_retries=retry))
+    session.mount('https://', HTTPAdapter(max_retries=retry))
     return session
 
 SESSION = get_retry_session()
 TIMEOUT = 15
-
-# 加载手动数据缓存
-MANUAL_DB = {}
-if os.path.exists(MANUAL_DATA_FILE):
-    try:
-        with open(MANUAL_DATA_FILE, 'r', encoding='utf-8') as f:
-            MANUAL_DB = json.load(f)
-        print(f"已加载离线手动数据文件: {MANUAL_DATA_FILE}")
-    except Exception as e:
-        print(f"加载离线文件失败: {e}")
-else:
-    print(f"未找到离线文件 {MANUAL_DATA_FILE}，将仅依赖在线获取。")
-
-
-def validate_recent_data(df, date_col="日期", days=90):
-    """验证数据是否包含最近 N 天的记录"""
-    if df is None or df.empty:
-        return False
-    try:
-        # 兼容字典列表格式
-        if isinstance(df, list) and len(df) > 0:
-            last_record = df[-1]
-            if date_col in last_record:
-                latest_date = pd.to_datetime(last_record[date_col])
-            else:
-                return True
-        elif isinstance(df, pd.DataFrame):
-            if date_col not in df.columns:
-                return True
-            latest_date_str = df[date_col].max()
-            latest_date = pd.to_datetime(latest_date_str)
-        else:
-            return False
-            
-        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days)
-        
-        if latest_date < cutoff_date:
-            print(f"   [警告] 数据过旧 (最新: {latest_date.strftime('%Y-%m-%d')})，触发备选接口...")
-            return False
-        return True
-    except Exception as e:
-        return True
-
-def call_with_retry(func, name, fallback_funcs=None, retries=3, check_freshness=False, *args, **kwargs):
-    """
-    通用重试与多级备选调用函数
-    fallback_funcs: 可是单个函数或函数列表
-    """
-    # 1. 尝试主函数
-    for i in range(retries):
-        try:
-            print(f"[{name}] 正在获取 (主接口, 尝试 {i+1}/{retries})...")
-            result = func(*args, **kwargs)
-            
-            if result is None or (isinstance(result, pd.DataFrame) and result.empty):
-                raise ValueError("返回数据为空")
-            
-            if check_freshness:
-                if not validate_recent_data(result):
-                    raise ValueError("数据未包含近3个月记录")
-            
-            print(f"[{name}] 获取成功。")
-            return result
-        except Exception as e:
-            if i == retries - 1:
-                print(f"[{name}] 主接口尝试失败: {e}")
-            time.sleep(2)
-    
-    # 2. 尝试备选函数列表
-    if fallback_funcs:
-        if not isinstance(fallback_funcs, list):
-            fallback_funcs = [fallback_funcs]
-            
-        for idx, fallback in enumerate(fallback_funcs):
-            print(f"[{name}] 尝试备选接口 {idx+1}...")
-            try:
-                result = fallback()
-                if result is not None and not (isinstance(result, pd.DataFrame) and result.empty):
-                    # 备选接口的数据也建议简单验证一下新鲜度，但不强制抛错
-                    if check_freshness:
-                        validate_recent_data(result) 
-                    print(f"[{name}] 备选接口 {idx+1} 获取成功。")
-                    return result
-            except Exception as e:
-                print(f"[{name}] 备选接口 {idx+1} 失败: {e}")
-            
-    print(f"[{name}] 所有途径均无法获取有效数据。")
-    return pd.DataFrame()
-
-def round_data(data):
-    """递归将数据中的浮点数保留两位小数"""
-    if isinstance(data, list):
-        return [round_data(x) for x in data]
-    elif isinstance(data, dict):
-        return {k: round_data(v) for k, v in data.items()}
-    elif isinstance(data, float):
-        return round(data, 2)
-    return data
-
-# ==============================================================================
-# 数据获取逻辑 - Alpha Vantage (新增)
-# ==============================================================================
-
-def fetch_alpha_vantage_indicator(indicator, interval="monthly"):
-    """
-    通用 Alpha Vantage 经济指标获取
-    indicator: REAL_GDP, CPI, UNEMPLOYMENT, RETAIL_SALES, DURABLE_GOODS, TREASURY_YIELD
-    """
-    url = "https://www.alphavantage.co/query"
-    params = {
-        "function": indicator,
-        "interval": interval, 
-        "apikey": ALPHA_VANTAGE_KEY
-    }
-    try:
-        r = SESSION.get(url, params=params, timeout=TIMEOUT)
-        data = r.json()
-        if "data" in data:
-            df = pd.DataFrame(data["data"])
-            df.rename(columns={"date": "日期", "value": "现值"}, inplace=True)
-            # 统一转换 value 为 float
-            df["现值"] = pd.to_numeric(df["现值"], errors='coerce')
-            # 如果是百分比数据，Alpha Vantage通常直接给数值 (e.g. 3.5 for 3.5%)
-            # 具体需根据指标微调，这里保持原始数值
-            return df
-    except Exception as e:
-        print(f"[Alpha Vantage] Error fetching {indicator}: {e}")
-    return pd.DataFrame()
-
-# ==============================================================================
-# 数据获取逻辑 - Jin10 & AKShare
-# ==============================================================================
-
-def fetch_jin10_base(attr_id, start_date_str):
-    headers = {
-        "user-agent": "Mozilla/5.0",
-        "x-app-id": "rU6QIu7JHe2gOUeR",
-        "x-version": "1.0.0",
-    }
-    url = "https://datacenter-api.jin10.com/reports/list_v2"
-    params = {
-        "max_date": "",
-        "category": "ec",
-        "attr_id": str(attr_id),
-        "_": str(int(round(time.time() * 1000))),
-    }
-    
-    all_dfs = []
-    
-    for _ in range(5):
-        try:
-            r = SESSION.get(url, params=params, headers=headers, timeout=TIMEOUT)
-            data_json = r.json()
-            if "data" not in data_json or "values" not in data_json["data"] or not data_json["data"]["values"]:
-                break
-            
-            temp_df = pd.DataFrame(data_json["data"]["values"])
-            temp_df.columns = ["日期", "今值", "预测值", "前值"]
-            
-            cols = ["今值", "预测值", "前值"]
-            for col in cols:
-                temp_df[col] = pd.to_numeric(temp_df[col], errors='coerce')
-
-            temp_df["日期"] = pd.to_datetime(temp_df["日期"])
-            
-            mask = temp_df["日期"] >= pd.to_datetime(start_date_str)
-            valid_data = temp_df[mask]
-            
-            if not valid_data.empty:
-                all_dfs.append(valid_data)
-            
-            min_date_in_page = temp_df["日期"].min()
-            if min_date_in_page < pd.to_datetime(start_date_str):
-                break
-                
-            last_date_str = temp_df.iloc[-1]["日期"].strftime("%Y-%m-%d")
-            next_max_date = (pd.to_datetime(last_date_str) - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-            params["max_date"] = next_max_date
-            
-        except Exception:
-            break
-
-    if all_dfs:
-        final_df = pd.concat(all_dfs, ignore_index=True)
-        final_df["日期"] = final_df["日期"].dt.strftime('%Y-%m-%d')
-        final_df.sort_values("日期", inplace=True)
-        return final_df
-    return pd.DataFrame()
-
-# --- Fallback Wrappers ---
-
-def fetch_china_cpi_fallback():
-    try: return ak.macro_china_cpi_monthly()
-    except: return pd.DataFrame()
-
-def fetch_china_ppi_fallback():
-    try: return ak.macro_china_ppi_yearly()
-    except: return pd.DataFrame()
-
-def fetch_china_pmi_fallback():
-    try: return ak.macro_china_pmi_yearly()
-    except: return pd.DataFrame()
-
-# 美国数据备选：AkShare -> Alpha Vantage
-def fetch_usa_cpi_fallback_ak():
-    try: return ak.macro_usa_cpi_monthly()
-    except: return pd.DataFrame()
-
-def fetch_usa_cpi_fallback_av():
-    return fetch_alpha_vantage_indicator("CPI")
-
-def fetch_usa_unemployment_fallback_ak():
-    try: return ak.macro_usa_unemployment_rate()
-    except: return pd.DataFrame()
-
-def fetch_usa_unemployment_fallback_av():
-    return fetch_alpha_vantage_indicator("UNEMPLOYMENT")
-
-def fetch_usa_retail_fallback_av():
-    return fetch_alpha_vantage_indicator("RETAIL_SALES")
 
 def fetch_latest_yf(ticker, name):
     """yfinance 获取最新一天的数据"""
     try:
         t = yf.Ticker(ticker)
         hist = t.history(period="5d")
-        
         if hist is None or hist.empty:
-            return []
-        
+            return [], "No data returned from yfinance"
         latest = hist.iloc[-1]
-        date_str = latest.name.strftime('%Y-%m-%d')
-        val = float(latest['Close'])
-        
-        return [{"日期": date_str, "最新值": val, "名称": name}]
+        data = [{
+            "日期": latest.name.strftime('%Y-%m-%d'),
+            "最新值": float(latest['Close']),
+            "名称": name
+        }]
+        return data, None
     except Exception as e:
         print(f"Error fetching {name} (yfinance): {e}")
-        return []
+        return [], str(e)
 
-def fetch_us_bond_yields_unified():
-    """获取美国国债数据并转换为统一的宽表格式"""
-    tickers_map = {
-        "13周": "^IRX",
-        "5年": "^FVX",
-        "10年": "^TNX",
-        "30年": "^TYX"
-    }
-    
-    temp_results = {}
-    latest_date = None
-    
-    for label, ticker in tickers_map.items():
-        data = fetch_latest_yf(ticker, label)
-        if data:
-            item = data[0]
-            current_date = item["日期"]
-            val = item["最新值"]
-            if latest_date is None or current_date > latest_date:
-                latest_date = current_date
-            temp_results[label] = val
-
-    if not temp_results or not latest_date:
-        # Fallback to Alpha Vantage if YFinance fails
-        print("[美国国债] YFinance 失败，尝试 Alpha Vantage...")
-        try:
-            df_av = fetch_alpha_vantage_indicator("TREASURY_YIELD", interval="daily")
-            if not df_av.empty:
-                latest_row = df_av.iloc[0] # AV 通常是降序，第一个是最新
-                return [{"日期": latest_row["日期"], "10年": latest_row["现值"]}] # AV只给10年期benchmark
-        except:
-            pass
-        return []
-
-    row = {"日期": latest_date}
-    row.update(temp_results)
-    return [row]
-
-def fetch_china_lpr_optimized():
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    params = {
-        "reportName": "RPTA_WEB_RATE",
-        "columns": "ALL",
-        "sortColumns": "TRADE_DATE",
-        "sortTypes": "-1",
-        "pageNumber": "1",
-        "pageSize": "50",
-        "source": "WEB",
-        "client": "WEB",
-    }
+def fetch_alpha_vantage_indicator(indicator, interval="daily"):
+    url = "https://www.alphavantage.co/query"
+    params = {"function": indicator, "interval": interval, "apikey": ALPHA_VANTAGE_KEY}
     try:
         r = SESSION.get(url, params=params, timeout=TIMEOUT)
-        data_json = r.json()
-        if not data_json.get("result"): return pd.DataFrame()
-        df = pd.DataFrame(data_json["result"]["data"])
-        df["TRADE_DATE"] = pd.to_datetime(df["TRADE_DATE"]).dt.strftime('%Y-%m-%d')
-        return df
+        data = r.json()
+        if "data" in data:
+            df = pd.DataFrame(data["data"])
+            df.rename(columns={"date": "日期", "value": "10年"}, inplace=True) 
+            return df
     except Exception:
-        raise
-
-def fetch_china_money_supply_custom():
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    params = {
-        "reportName": "RPT_ECONOMY_CURRENCY_SUPPLY", 
-        "columns": "REPORT_DATE,TIME,M2,M2_SAME,M2_SEQUENTIAL,M1,M1_SAME,M1_SEQUENTIAL,M0,M0_SAME,M0_SEQUENTIAL",
-        "pageNumber": "1",
-        "pageSize": "50",
-        "sortColumns": "REPORT_DATE",
-        "sortTypes": "-1",
-        "source": "WEB",
-        "client": "WEB",
-    }
-    try:
-        r = SESSION.get(url, params=params, timeout=TIMEOUT)
-        data_json = r.json()
-        if not data_json.get("result"): return pd.DataFrame()
-        df = pd.DataFrame(data_json["result"]["data"])
-        df.rename(columns={"TIME": "日期","M2": "M2(亿元)", "M2_SAME": "M2同比增长","M1": "M1(亿元)", "M1_SAME": "M1同比增长","M0": "M0(亿元)", "M0_SAME": "M0同比增长"}, inplace=True)
-        df["日期"] = pd.to_datetime(df["REPORT_DATE"]).dt.strftime('%Y-%m-%d')
-        return df
-    except Exception:
-        raise
-
-def fetch_china_bond_yield_fallback():
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    params = {
-        "reportName": "RPT_BOND_YIELD_CURVE",
-        "columns": "TRADE_DATE,YIELD_1Y,YIELD_2Y,YIELD_10Y,YIELD_30Y",
-        "filter": '(CURVE_TYPE="0")(IS_DISTINCT="1")', 
-        "pageNumber": "1",
-        "pageSize": "50",
-        "sortColumns": "TRADE_DATE",
-        "sortTypes": "-1",
-        "source": "WEB",
-        "client": "WEB",
-    }
-    try:
-        r = SESSION.get(url, params=params, timeout=TIMEOUT)
-        data_json = r.json()
-        df = pd.DataFrame(data_json["result"]["data"])
-        df.rename(columns={"TRADE_DATE": "日期","YIELD_1Y": "1年", "YIELD_2Y": "2年", "YIELD_10Y": "10年", "YIELD_30Y": "30年"}, inplace=True)
-        df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
-        return df
-    except Exception:
-        raise
-
-def fetch_japan_bond_yield_latest():
-    """获取日本国债（主要是10年期）并转为宽表格式"""
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    params = {
-        "reportName": "RPT_ECONOMICVALUE_JPAN",
-        "columns": "REPORT_DATE,PUBLISH_DATE,VALUE,PRE_VALUE",
-        "filter": '(INDICATOR_ID="EMG00341609")', 
-        "pageNumber": "1",
-        "pageSize": "50",
-        "sortColumns": "REPORT_DATE",
-        "sortTypes": "-1",
-        "source": "WEB",
-        "client": "WEB",
-    }
-    try:
-        r = SESSION.get(url, params=params, timeout=TIMEOUT)
-        data_json = r.json()
-        if not data_json.get("result"): return pd.DataFrame()
-        df = pd.DataFrame(data_json["result"]["data"])
-        
-        # 转换列名以匹配宽表结构
-        df.rename(columns={"PUBLISH_DATE": "日期", "VALUE": "10年"}, inplace=True)
-        df["日期"] = pd.to_datetime(df["日期"]).dt.strftime('%Y-%m-%d')
-        
-        # 只保留需要的列
-        return df[["日期", "10年"]]
-    except Exception:
-        raise
-
-def get_southbound_fund_flow_safe():
-    try:
-        df = ak.stock_hsgt_fund_flow_summary_em()
-        if df is not None and not df.empty:
-            south_df = df[df['资金方向'] == '南向资金'].copy()
-            south_df.rename(columns={'交易日': '日期', '资金净流入': '净流入(亿元)'}, inplace=True)
-            south_df['日期'] = pd.to_datetime(south_df['日期']).dt.strftime('%Y-%m-%d')
-            return south_df[['日期', '净流入(亿元)']]
-    except Exception:
-        raise
+        pass
     return pd.DataFrame()
 
 # ==============================================================================
-# JSON 保存逻辑
+# 核心获取逻辑 (在线)
 # ==============================================================================
 
-def save_custom_json(data, filename):
-    rounded_data = round_data(data)
-    with open(filename, 'w', encoding='utf-8') as f:
-        f.write('{\n')
-        categories = list(rounded_data.keys())
-        for i, category in enumerate(categories):
-            f.write(f'    "{category}": {{\n')
-            indicators = list(rounded_data[category].keys())
-            for j, indicator in enumerate(indicators):
-                records = rounded_data[category][indicator]
-                f.write(f'        "{indicator}": [\n')
-                for k, record in enumerate(records):
-                    record_str = json.dumps(record, ensure_ascii=False)
-                    comma = "," if k < len(records) - 1 else ""
-                    f.write(f'            {record_str}{comma}\n')
-                comma_outer = "," if j < len(indicators) - 1 else ""
-                f.write(f'        ]{comma_outer}\n')
-            comma_cat = "," if i < len(categories) - 1 else ""
-            f.write(f'    }}{comma_cat}\n')
-        f.write('}')
-
-# ==============================================================================
-# 主逻辑
-# ==============================================================================
-
-def process_df(df, date_col="日期", value_cols=None, start_date_dt=None):
-    if df is None or df.empty:
-        return []
+def fetch_us_bond_yields():
+    print("   -> 获取美国国债数据...")
+    tickers_map = {"13周": "^IRX", "5年": "^FVX", "10年": "^TNX", "30年": "^TYX"}
+    temp_results = {}
+    latest_date = None
+    errors = []
     
-    if date_col not in df.columns:
-        possible_dates = [c for c in df.columns if "date" in c.lower() or "日期" in c or "时间" in c or "TIME" in c]
-        if possible_dates:
-            date_col = possible_dates[0]
-        else:
-            return []
-    
-    try:
-        df = df.copy()
-        if df[date_col].dtype == object:
-            df[date_col] = df[date_col].astype(str).str.replace('年', '-').str.replace('月', '-').str.replace('日', '')
-        
-        # 强制 coerce 错误，并忽略警告
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-            
-        df = df.dropna(subset=[date_col])
-        
-        if start_date_dt:
-            mask = df[date_col] >= start_date_dt
-            filtered = df.loc[mask].copy()
-        else:
-            filtered = df.copy()
-
-        filtered[date_col] = filtered[date_col].dt.strftime('%Y-%m-%d')
-        
-        # 核心修复：按日期去重，保留最后一条数据
-        filtered = filtered.drop_duplicates(subset=[date_col], keep='last')
-        
-        if value_cols:
-            valid_cols = [date_col] + [c for c in value_cols if c in filtered.columns]
-            filtered = filtered[valid_cols]
-        
-        return filtered.to_dict(orient="records")
-    except Exception as e:
-        print(f"   [Error] Process DF: {e}")
-        return []
-
-def get_manual_fallback(category, indicator):
-    """从全局 MANUAL_DB 中获取数据"""
-    if MANUAL_DB and category in MANUAL_DB and indicator in MANUAL_DB[category]:
-        data = MANUAL_DB[category][indicator]
+    # 优先使用 YFinance
+    for label, ticker in tickers_map.items():
+        data, err = fetch_latest_yf(ticker, label)
         if data:
-            return data
-    return []
+            item = data[0]
+            if latest_date is None or item["日期"] > latest_date:
+                latest_date = item["日期"]
+            temp_results[label] = item["最新值"]
+        else:
+            errors.append(f"{label}: {err}")
 
-def get_data_main():
-    """对外接口：获取所有宏观经济与市场数据"""
-    end_date_dt = datetime.datetime.now()
-    start_date_dt = end_date_dt - datetime.timedelta(days=185)
-    start_date_str = start_date_dt.strftime("%Y-%m-%d")
+    if temp_results and latest_date:
+        row = {"日期": latest_date}
+        row.update(temp_results)
+        return [row], None
     
-    start_date_ak = start_date_dt.strftime("%Y%m%d")
-    end_date_ak = end_date_dt.strftime("%Y%m%d")
+    # Fallback: Alpha Vantage (仅10年)
+    try:
+        df_av = fetch_alpha_vantage_indicator("TREASURY_YIELD")
+        if not df_av.empty:
+            return [df_av.iloc[0].to_dict()], None
+    except Exception as e:
+        errors.append(f"AlphaVantage: {str(e)}")
+        
+    return [], "; ".join(errors) if errors else "All sources failed"
 
-    data_store = {"market_fx": {}, "china": {}, "usa": {}, "japan": {}}
-    print(">>> 开始数据获取任务 (离线优先版 + 多源备用)...")
+def fetch_china_bond_yields():
+    print("   -> 获取中国国债数据...")
+    end_date = datetime.datetime.now()
+    start_date = end_date - datetime.timedelta(days=30)
+    try:
+        df = ak.bond_china_yield(start_date=start_date.strftime("%Y%m%d"), end_date=end_date.strftime("%Y%m%d"))
+        if df is None or df.empty:
+            # 备用：东方财富接口
+            url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+            params = {
+                "reportName": "RPT_BOND_YIELD_CURVE",
+                "columns": "TRADE_DATE,YIELD_1Y,YIELD_2Y,YIELD_10Y,YIELD_30Y",
+                "filter": '(CURVE_TYPE="0")(IS_DISTINCT="1")',
+                "pageNumber": "1", "pageSize": "5", "sortColumns": "TRADE_DATE", "sortTypes": "-1", "source": "WEB", "client": "WEB"
+            }
+            r = SESSION.get(url, params=params, timeout=TIMEOUT)
+            df = pd.DataFrame(r.json()["result"]["data"])
+            df.rename(columns={"TRADE_DATE": "日期","YIELD_1Y": "1年", "YIELD_2Y": "2年", "YIELD_10Y": "10年", "YIELD_30Y": "30年"}, inplace=True)
+        else:
+            df.rename(columns={"日期": "日期", "1年": "1年", "2年": "2年", "10年": "10年", "30年": "30年"}, inplace=True)
+        
+        df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+        latest = df.sort_values("日期").iloc[-1].to_dict()
+        data = [{k: v for k, v in latest.items() if k in ['日期', '1年', '2年', '10年', '30年']}]
+        return data, None
+    except Exception as e:
+        print(f"中国国债获取失败: {e}")
+        return [], str(e)
 
-    # -------------------------------------------------------------------------
-    # 1. 市场指数与汇率
-    # -------------------------------------------------------------------------
-    print("\n--- 正在获取: VIX, 汇率 (最新值) ---")
+def fetch_japan_bond_yields():
+    """
+    使用 Investing.com 爬取日本国债收益率
+    目标: 2年, 10年, 30年
+    改进: 全表扫描，支持多期限抓取
+    """
+    print("   -> 获取日本国债数据 (Investing.com)...")
+    url = "https://cn.investing.com/rates-bonds/japan-government-bonds"
+    try:
+        r = SESSION.get(url, timeout=TIMEOUT)
+        r.raise_for_status()
+        
+        # 解析表格
+        try:
+            dfs = pd.read_html(StringIO(r.text))
+        except ValueError as ve:
+            return [], f"No tables found in response: {ve}"
+
+        # 定义需要抓取的目标名称和输出key的映射
+        targets = {
+            "日本2年期国债": "2年",
+            "日本10年期国债": "10年",
+            "日本30年期国债": "30年"
+        }
+        
+        found_data = {}
+
+        # 遍历所有表格，寻找所有目标
+        for df in dfs:
+            # 转换为字符串，便于查找
+            df_str = df.astype(str)
+            
+            for target_name, output_key in targets.items():
+                if output_key in found_data:
+                    continue # 已经找到就不重复找了
+                
+                # 寻找包含目标名称的行
+                mask = df_str.apply(lambda x: x.str.contains(target_name, na=False))
+                
+                if mask.any().any():
+                    # 获取行索引
+                    row_idx = mask.any(axis=1).idxmax()
+                    target_row = df.loc[row_idx]
+                    
+                    yield_val = None
+                    
+                    # 策略 A: 查找列名包含 "收益率" 或 "Yield" 的列
+                    cols = [str(c).strip() for c in df.columns]
+                    target_col_name = None
+                    possible_names = ["收益率", "债券收益率", "Yield", "最新", "最新价", "Last"]
+                    for pname in possible_names:
+                        for c in cols:
+                            if pname in c:
+                                target_col_name = c
+                                break
+                        if target_col_name:
+                            break
+                    
+                    if target_col_name:
+                        yield_val = target_row[target_col_name]
+                    else:
+                        # 策略 B: 取名称所在列右侧的第一列
+                        name_col_idx = -1
+                        for i, is_found in enumerate(mask.iloc[row_idx]):
+                            if is_found:
+                                name_col_idx = i
+                                break
+                        if name_col_idx != -1 and name_col_idx + 1 < len(df.columns):
+                            yield_val = df.iloc[row_idx, name_col_idx + 1]
+
+                    # 数据清洗并存储
+                    if yield_val is not None:
+                        try:
+                            val_str = str(yield_val).replace('%', '').strip()
+                            found_data[output_key] = float(val_str)
+                        except ValueError:
+                            pass # 解析失败则忽略
+
+        if not found_data:
+            return [], "Targets (2Y/10Y/30Y) not found in any table"
+
+        # 构造返回结果 (单条记录包含多个期限)
+        current_date = datetime.datetime.now().strftime('%Y-%m-%d')
+        result_row = {"日期": current_date}
+        result_row.update(found_data)
+        
+        # 打印日志方便确认
+        found_keys = list(found_data.keys())
+        print(f"   [日本国债] 抓取成功: {found_keys}")
+        
+        return [result_row], None
+
+    except Exception as e:
+        print(f"日本国债获取失败: {e}")
+        return [], str(e)
+
+def fetch_vietnam_index_klines():
+    """
+    使用 Investing.com 爬取越南胡志明指数历史数据
+    目标: K线数据 (日期, 收盘, 开盘, 高, 低, 交易量, 涨跌幅)
+    """
+    print("   -> 获取越南胡志明指数K线 (Investing.com)...")
+    url = "https://cn.investing.com/indices/vn-historical-data"
+    try:
+        r = SESSION.get(url, timeout=TIMEOUT)
+        r.raise_for_status()
+        
+        # 移除 id="curr_table" 限制，Investing.com ID 可能会变
+        try:
+            dfs = pd.read_html(StringIO(r.text))
+        except ValueError as ve:
+             # 如果解析失败，打印部分内容检查是否被反爬
+             print(f"   [Debug] Read HTML failed. Response preview: {r.text[:200]}...")
+             return [], f"Read HTML failed: {ve}"
+
+        if not dfs:
+            return [], "No tables found in response"
+        
+        df = None
+        # 遍历所有表格，寻找包含特定列名的表格
+        for i, temp_df in enumerate(dfs):
+            cols = [str(c).strip() for c in temp_df.columns]
+            # 特征列：日期 + 收盘
+            if "日期" in cols and "收盘" in cols:
+                df = temp_df
+                # print(f"   [Debug] Found VN Index table at index {i}")
+                break
+        
+        if df is None:
+            # 再次尝试打印所有表格的列名以便调试
+            # for i, temp_df in enumerate(dfs):
+            #     print(f"   [Debug] Table {i} columns: {temp_df.columns.tolist()}")
+            return [], "Table with columns '日期' and '收盘' not found"
+        
+        # 数据清洗设计
+        # 1. 日期格式: 2025年12月31日 -> 2025-12-31
+        def parse_date(x):
+            try:
+                return datetime.datetime.strptime(str(x), "%Y年%m月%d日").strftime("%Y-%m-%d")
+            except:
+                return str(x)
+        
+        df["日期"] = df["日期"].apply(parse_date)
+        
+        # 2. 数值处理 (移除逗号)
+        cols_to_clean = ["收盘", "开盘", "高", "低"]
+        for col in cols_to_clean:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", ""), errors="coerce")
+        
+        # 3. 交易量处理 (M -> *1e6, K -> *1e3, B -> *1e9)
+        def parse_volume(x):
+            if pd.isna(x) or x == '-':
+                return 0
+            s = str(x).upper()
+            multi = 1
+            if "M" in s:
+                multi = 1_000_000
+                s = s.replace("M", "")
+            elif "K" in s:
+                multi = 1_000
+                s = s.replace("K", "")
+            elif "B" in s:
+                multi = 1_000_000_000
+                s = s.replace("B", "")
+            try:
+                return float(s) * multi
+            except:
+                return 0
+        
+        if "交易量" in df.columns:
+            df["交易量"] = df["交易量"].apply(parse_volume)
+            
+        # 4. 涨跌幅 (移除 %)
+        if "涨跌幅" in df.columns:
+            df["涨跌幅"] = pd.to_numeric(df["涨跌幅"].astype(str).str.replace("%", ""), errors="coerce")
+        
+        # 排序
+        df = df.sort_values("日期", ascending=True)
+        
+        # 映射为标准 OHLCV 格式
+        # 输出字段: date, open, high, low, close, volume
+        result = []
+        for _, row in df.iterrows():
+            result.append({
+                "date": row["日期"],
+                "open": row.get("开盘"),
+                "high": row.get("高"),
+                "low": row.get("低"),
+                "close": row.get("收盘"),
+                "volume": row.get("交易量"),
+                "change_pct": row.get("涨跌幅")
+            })
+            
+        return result, None
+
+    except Exception as e:
+        print(f"越南指数获取失败: {e}")
+        return [], str(e)
+
+# ==============================================================================
+# 主入口
+# ==============================================================================
+
+def get_market_fx_and_bonds():
+    """
+    获取汇率、VIX、国债数据
+    Returns:
+        tuple: (data_store, status_logs)
+    """
+    print(">>> [fetch_data] 开始在线获取 FX 和 国债数据...")
+    
+    data_store = {
+        "market_fx": {},
+        "china": {},
+        "usa": {},
+        "japan": {}
+    }
+    
+    # 状态日志列表: {'name': str, 'status': bool, 'error': str}
+    status_logs = []
+
+    # 1. Market FX
     tickers = {
         "VIX恐慌指数": "^VIX",
         "美元/人民币": "CNY=X",
         "美元/日元": "JPY=X",
         "美元/越南盾": "VND=X"
     }
-    
     for name, ticker in tickers.items():
-        manual_res = get_manual_fallback("market_fx", name)
-        if manual_res:
-            res = manual_res
-            print(f"[{name}] 优先使用离线手动数据。")
-        else:
-            res = fetch_latest_yf(ticker, name)
-            if not res:
-                print(f"[{name}] 获取失败。")
-            else:
-                print(f"[{name}] 获取成功。")
-        
+        res, err = fetch_latest_yf(ticker, name)
         if res:
             data_store["market_fx"][name] = res
+            status_logs.append({'name': name, 'status': True, 'error': None})
+            print(f"   [{name}] OK")
+        else:
+            status_logs.append({'name': name, 'status': False, 'error': err})
+            print(f"   [{name}] Failed")
 
-    # -------------------------------------------------------------------------
-    # 2. 中国数据
-    # -------------------------------------------------------------------------
-    print("\n--- 正在获取: 中国经济数据 ---")
-    china = data_store["china"]
-    
-    def check_and_store(cat, key, fetch_call, fallback_funcs=None, **kwargs):
-        manual_res = get_manual_fallback(cat, key)
-        if manual_res:
-            print(f"[{key}] 优先使用离线手动数据。")
-            return manual_res
-
-        df = call_with_retry(fetch_call, key, fallback_funcs=fallback_funcs, **kwargs)
-        res = process_df(df, start_date_dt=start_date_dt)
-        return res
-
-    china["CPI"] = check_and_store("china", "CPI", lambda: fetch_jin10_base(72, start_date_str), 
-                                   fallback_funcs=[fetch_china_cpi_fallback], check_freshness=True)
-    china["PPI"] = check_and_store("china", "PPI", lambda: fetch_jin10_base(60, start_date_str),
-                                   fallback_funcs=[fetch_china_ppi_fallback], check_freshness=True)
-    china["PMI_制造业"] = check_and_store("china", "PMI_制造业", lambda: fetch_jin10_base(65, start_date_str),
-                                       fallback_funcs=[fetch_china_pmi_fallback], check_freshness=True)
-    
-    res_lpr = get_manual_fallback("china", "LPR")
-    if res_lpr:
-        print("[中国LPR] 优先使用离线手动数据。")
+    # 2. Bonds
+    # USA
+    data_us, err_us = fetch_us_bond_yields()
+    if data_us:
+        data_store["usa"]["国债收益率"] = data_us
+        status_logs.append({'name': "美国国债收益率", 'status': True, 'error': None})
     else:
-        df_lpr = call_with_retry(fetch_china_lpr_optimized, "中国LPR", check_freshness=True)
-        res_lpr = process_df(df_lpr, date_col="TRADE_DATE", start_date_dt=start_date_dt)
-    china["LPR"] = res_lpr
+        status_logs.append({'name': "美国国债收益率", 'status': False, 'error': err_us})
 
-    china["货币供应量"] = check_and_store("china", "货币供应量", fetch_china_money_supply_custom, check_freshness=True)
-
-    def fetch_bond_ak_wrapper():
-        return ak.bond_china_yield(start_date=start_date_ak, end_date=end_date_ak)
-    
-    res_bond = get_manual_fallback("china", "国债收益率")
-    if res_bond:
-        print("[中国国债] 优先使用离线手动数据。")
+    # China
+    data_cn, err_cn = fetch_china_bond_yields()
+    if data_cn:
+        data_store["china"]["国债收益率"] = data_cn
+        status_logs.append({'name': "中国国债收益率", 'status': True, 'error': None})
     else:
-        df_bond = call_with_retry(fetch_bond_ak_wrapper, "中国国债", fallback_funcs=[fetch_china_bond_yield_fallback], check_freshness=True)
-        res_bond = process_df(df_bond, value_cols=['1年', '2年', '10年', '30年'], start_date_dt=start_date_dt)
-    china["国债收益率"] = res_bond
+        status_logs.append({'name': "中国国债收益率", 'status': False, 'error': err_cn})
 
-    res_south = get_manual_fallback("china", "南向资金净流入")
-    if res_south:
-        print("[南向资金] 优先使用离线手动数据。")
+    # Japan (使用新接口, 支持2/10/30年)
+    data_jp, err_jp = fetch_japan_bond_yields()
+    if data_jp:
+        data_store["japan"]["国债收益率"] = data_jp
+        status_logs.append({'name': "日本国债收益率", 'status': True, 'error': None})
     else:
-        df_south = call_with_retry(get_southbound_fund_flow_safe, "南向资金", check_freshness=True)
-        res_south = process_df(df_south, date_col="日期", start_date_dt=start_date_dt)
-    china["南向资金净流入"] = res_south
+        status_logs.append({'name': "日本国债收益率", 'status': False, 'error': err_jp})
+        print(f"   [日本国债] Failed: {err_jp}")
 
-    # -------------------------------------------------------------------------
-    # 3. 美国数据
-    # -------------------------------------------------------------------------
-    print("\n--- 正在获取: 美国经济数据 ---")
-    usa = data_store["usa"]
-
-    # 失业率：Jin10 -> AkShare -> Alpha Vantage
-    usa["失业率"] = check_and_store("usa", "失业率", lambda: fetch_jin10_base(47, start_date_str), 
-                                  fallback_funcs=[fetch_usa_unemployment_fallback_ak, fetch_usa_unemployment_fallback_av], check_freshness=True)
-    
-    # CPI: Jin10 -> AkShare -> Alpha Vantage
-    usa["CPI"] = check_and_store("usa", "CPI", lambda: fetch_jin10_base(9, start_date_str), 
-                                 fallback_funcs=[fetch_usa_cpi_fallback_ak, fetch_usa_cpi_fallback_av], check_freshness=True)
-
-    # 零售: Jin10 -> Alpha Vantage
-    usa["零售销售月率"] = check_and_store("usa", "零售销售月率", lambda: fetch_jin10_base(39, start_date_str), 
-                                       fallback_funcs=[fetch_usa_retail_fallback_av], check_freshness=True)
-
-    # 美国国债 (统一宽表格式 Key: 国债收益率)
-    res_bonds = get_manual_fallback("usa", "国债收益率")
-    if res_bonds:
-        print("[美国国债] 优先使用离线手动数据。")
-    else:
-        print("[美国国债] 正在获取最新值 (在线)...")
-        res_bonds = fetch_us_bond_yields_unified()
-    usa["国债收益率"] = res_bonds
-
-    # Jin10 数据 (暂无 Alpha Vantage 完美替代品，维持现状)
-    usa["ISM_制造业PMI"] = check_and_store("usa", "ISM_制造业PMI", lambda: fetch_jin10_base(28, start_date_str), check_freshness=True)
-    usa["ISM_非制造业PMI"] = check_and_store("usa", "ISM_非制造业PMI", lambda: fetch_jin10_base(29, start_date_str), check_freshness=True)
-    usa["非农就业人数"] = check_and_store("usa", "非农就业人数", lambda: fetch_jin10_base(33, start_date_str), check_freshness=True)
-    usa["利率决议"] = check_and_store("usa", "利率决议", lambda: fetch_jin10_base(24, start_date_str), check_freshness=True)
-
-    # -------------------------------------------------------------------------
-    # 4. 日本数据
-    # -------------------------------------------------------------------------
-    print("\n--- 正在获取: 日本经济数据 ---")
-    japan = data_store["japan"]
-
-    def fetch_japan_rate_safe():
-        try: return ak.macro_japan_bank_rate()
-        except: return fetch_jin10_base(22, start_date_str)
-    
-    japan["央行利率"] = check_and_store("japan", "央行利率", fetch_japan_rate_safe, check_freshness=True)
-
-    res_jp_bond = get_manual_fallback("japan", "国债收益率")
-    if res_jp_bond:
-        print("[日本国债] 优先使用离线手动数据。")
-    else:
-        df_jp_bond = call_with_retry(fetch_japan_bond_yield_latest, "日本国债10Y", check_freshness=True)
-        res_jp_bond = process_df(df_jp_bond, value_cols=['10年'], start_date_dt=start_date_dt)
-    
-    japan["国债收益率"] = res_jp_bond
-
-    return data_store
+    return data_store, status_logs
 
 if __name__ == "__main__":
-    try:
-        data = get_data_main()
-    except Exception as e:
-        print(f"严重错误: {e}")
-        data = {}
-
-    output_file = "data.json"
-    try:
-        save_custom_json(data, output_file)
-        print(f"\n全部完成！数据已保存至 {output_file}")
-    except Exception as e:
-        print(f"保存失败: {e}")
+    # Test
+    data, logs = get_market_fx_and_bonds()
+    vn_data, vn_err = fetch_vietnam_index_klines()
+    print("VNI Data (Top 2):", vn_data[:2] if vn_data else vn_err)
