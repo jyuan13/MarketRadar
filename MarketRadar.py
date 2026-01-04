@@ -79,7 +79,6 @@ TARGETS_GLOBAL = {
     "恒生科技":     {"ak": "HSTECH",  "yf": "^HSTECH",  "type": "index_hk"},
     "恒生指数":     {"ak": "HSI",     "yf": "^HSI",     "type": "index_hk"},
     # [修改] 移除越南胡志明指数，交由 Step 4 的 fetch_data 爬虫专门处理，避免 YFinance 报错
-    # "越南胡志明指数": {"ak": None,      "yf": "^VNINDEX", "type": "index_global"}, 
     "黄金(COMEX)":  {"ak": "GC",      "yf": "GC=F",     "type": "future_foreign"},  
     "白银(COMEX)":  {"ak": "SI",      "yf": "SI=F",     "type": "future_foreign"},  
     "铜(COMEX)":    {"ak": "HG",      "yf": "HG=F",     "type": "future_foreign"}, 
@@ -160,10 +159,43 @@ TARGETS_HK_PHARMA = {
 }
 
 # ------------------------------------------------
-# [新增] 任务组 6: 恒生医疗保健指数
+# 任务组 6: 恒生医疗保健指数 (已确保状态追踪)
 # ------------------------------------------------
 TARGETS_HK_HEALTHCARE = {
     "恒生医疗保健指数": {"ak": "HSHCI", "yf": "^HSHCI", "type": "index_hk"},
+}
+
+# ------------------------------------------------
+# [新增] 任务组 7: 科创50 ETF (修正代码为588000)
+# ------------------------------------------------
+TARGETS_STAR50_ETF = {
+    "科创50ETF": {"ak": "588000", "yf": "588000.SS", "type": "etf_zh"},
+}
+
+# ------------------------------------------------
+# [新增] 任务组 8: 科创50 持仓股
+# ------------------------------------------------
+TARGETS_STAR50_HOLDINGS = {
+    "中芯国际": {"ak": "688981", "yf": "688981.SS", "type": "stock_zh_a"},
+    "海光信息": {"ak": "688041", "yf": "688041.SS", "type": "stock_zh_a"},
+    "寒武纪":   {"ak": "688256", "yf": "688256.SS", "type": "stock_zh_a"},
+    "澜起科技": {"ak": "688008", "yf": "688008.SS", "type": "stock_zh_a"},
+    "中微公司": {"ak": "688012", "yf": "688012.SS", "type": "stock_zh_a"},
+    "联影医疗": {"ak": "688271", "yf": "688271.SS", "type": "stock_zh_a"},
+    "金山办公": {"ak": "688111", "yf": "688111.SS", "type": "stock_zh_a"},
+    "芯原股份": {"ak": "688521", "yf": "688521.SS", "type": "stock_zh_a"},
+    "石头科技": {"ak": "688169", "yf": "688169.SS", "type": "stock_zh_a"},
+    "传音控股": {"ak": "688036", "yf": "688036.SS", "type": "stock_zh_a"},
+    "沪硅产业": {"ak": "688126", "yf": "688126.SS", "type": "stock_zh_a"},
+    "华海清科": {"ak": "688120", "yf": "688120.SS", "type": "stock_zh_a"},
+    "晶晨股份": {"ak": "688099", "yf": "688099.SS", "type": "stock_zh_a"},
+    "拓荆科技": {"ak": "688072", "yf": "688072.SS", "type": "stock_zh_a"},
+    "恒玄科技": {"ak": "688608", "yf": "688608.SS", "type": "stock_zh_a"},
+    "中控技术": {"ak": "688777", "yf": "688777.SS", "type": "stock_zh_a"},
+    "佰维存储": {"ak": "688525", "yf": "688525.SS", "type": "stock_zh_a"},
+    "思特威":   {"ak": "688213", "yf": "688213.SS", "type": "stock_zh_a"},
+    "芯联集成": {"ak": "688469", "yf": "688469.SS", "type": "stock_zh_a"},
+    "百利天恒": {"ak": "688506", "yf": "688506.SS", "type": "stock_zh_a"},
 }
 
 # 环境变量 (参考 data_provider.py 的命名)
@@ -233,6 +265,11 @@ class MarketFetcher:
 
             try:
                 df = pd.DataFrame()
+                
+                # 预处理日期：部分AkShare接口需要 YYYYMMDD 格式
+                start_date_clean = FETCH_START_DATE.replace("-", "")
+                end_date_clean = END_DATE.replace("-", "")
+
                 if asset_type == "index_us":
                     df = ak.index_us_stock_sina(symbol=symbol)
                 elif asset_type == "index_hk":
@@ -250,9 +287,14 @@ class MarketFetcher:
                         df = pd.DataFrame()
                 elif asset_type == "stock_us":
                     df = ak.stock_us_daily(symbol=symbol, adjust="qfq")
-                # [配置] 增加国内期货主力合约支持 (用于上海金)
                 elif asset_type == "future_zh_sina":
                     df = ak.futures_main_sina(symbol=symbol)
+                # [新增] A股 ETF 基金 (如科创50ETF 588000)
+                elif asset_type == "etf_zh":
+                    df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date=start_date_clean, end_date=end_date_clean, adjust="qfq")
+                # [新增] A股 股票 (如 688981)
+                elif asset_type == "stock_zh_a":
+                    df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date_clean, end_date=end_date_clean, adjust="qfq")
                 
                 if not df.empty:
                     print(" ✅")
@@ -552,12 +594,23 @@ def get_all_kline_data():
     all_ma_data.extend(ma_hk)
     all_status_logs.extend(logs_hk)
     
-    # [新增] 6. 抓取恒生医疗保健指数
-    # 单独作为一个项放到最终的 json 中 (key="恒生医疗保健指数")
+    # 6. 抓取恒生医疗保健指数
     data_hc, ma_hc, logs_hc = fetch_group_data(fetcher, TARGETS_HK_HEALTHCARE, "恒生医疗保健指数")
     all_data_collection["data"]["恒生医疗保健指数"] = data_hc
     all_ma_data.extend(ma_hc)
     all_status_logs.extend(logs_hc)
+
+    # [新增] 7. 抓取科创50 ETF
+    data_star_etf, ma_star_etf, logs_star_etf = fetch_group_data(fetcher, TARGETS_STAR50_ETF, "科创50ETF")
+    all_data_collection["data"]["科创50ETF"] = data_star_etf
+    all_ma_data.extend(ma_star_etf)
+    all_status_logs.extend(logs_star_etf)
+
+    # [新增] 8. 抓取科创50持仓
+    data_star_holdings, ma_star_holdings, logs_star_holdings = fetch_group_data(fetcher, TARGETS_STAR50_HOLDINGS, "科创50持仓")
+    all_data_collection["data"]["科创50持仓"] = data_star_holdings
+    all_ma_data.extend(ma_star_holdings)
+    all_status_logs.extend(logs_star_holdings)
     
     # 将汇总的均线数据存入
     all_data_collection["ma_data"] = all_ma_data

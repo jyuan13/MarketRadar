@@ -285,7 +285,8 @@ def main():
             email_subject = f"MarketRadar全量日报_{datetime.now(TZ_CN).strftime('%Y-%m-%d')}"
             
             # 构建正文 (使用北京时间)
-            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观(Selenium), 汇率/国债(Online), K线(Stock/VNI)\n\n"
+            # [更新] 描述中增加 "科创50"
+            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观(Selenium), 汇率/国债(Online), K线(Stock/VNI/科创50)\n\n"
             status_body = generate_email_body_summary(all_status_logs)
             email_body = base_body + status_body
             
