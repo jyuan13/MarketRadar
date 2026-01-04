@@ -8,6 +8,7 @@
 # 4. [定制逻辑] 针对“中国_南向资金”仅获取近30天数据；其他数据保持近180天。
 # 5. [新增] 支持 Investing.com 数据格式清洗（处理 K/M 交易量单位及中文日期）。
 # 6. [反爬] 增加防检测参数以应对 Investing.com。
+# 7. [修复] 解决 Investing.com 卡死问题：采用 eager 加载策略 + 禁用图片。
 # -----------------------------------------------------------------------------
 
 import time
@@ -74,8 +75,17 @@ class MacroDataScraper:
         self.chrome_options.add_argument("--log-level=3")
         self.chrome_options.add_argument("--no-sandbox")
         self.chrome_options.add_argument("--disable-dev-shm-usage")
-        self.chrome_options.add_argument("--disable-blink-features=AutomationControlled") # [新增] 防止被识别为自动化
+        self.chrome_options.add_argument("--disable-blink-features=AutomationControlled") # 防止被识别为自动化
         self.chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
+        
+        # [关键修复] 设置页面加载策略为 'eager'
+        # 'normal': 等待所有资源（css, images, scripts）加载完成 -> 会卡死
+        # 'eager': DOM 解析完就继续 -> 极大提升速度并防止因广告脚本卡死
+        self.chrome_options.page_load_strategy = 'eager'
+
+        # [关键修复] 禁用图片加载，进一步提速
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        self.chrome_options.add_experimental_option("prefs", prefs)
         
         # 独立运行时输出文件路径
         self.output_path = "OnlineReport.json"
@@ -147,13 +157,28 @@ class MacroDataScraper:
             try:
                 driver = webdriver.Chrome(options=self.chrome_options)
                 
+                # [关键修复] CDP 命令：在页面加载前移除 navigator.webdriver 标志
+                driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": """
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => undefined
+                        })
+                    """
+                })
+
                 # 强制设置超时，防止页面加载卡死
-                driver.set_page_load_timeout(45) 
-                driver.set_script_timeout(45)
+                driver.set_page_load_timeout(30) # 缩短超时，因为用了 eager 模式，应该很快
+                driver.set_script_timeout(30)
                 
                 driver.get(url)
-                # 等待表格加载
-                WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
+                
+                # 等待表格加载 (关键)
+                # Investing.com 可能需要一点时间渲染表格
+                try:
+                    WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
+                except Exception:
+                    # 如果找不到表格，可能是反爬验证，或者是页面结构变了
+                    print(f"⚠️ [{name}] 等待表格超时，尝试继续解析源码...")
                 
                 # 获取页面源码解析
                 html = driver.page_source
@@ -162,18 +187,12 @@ class MacroDataScraper:
                 if not dfs:
                     raise ValueError("页面解析为空，未找到表格数据")
 
-                # [逻辑优化] 根据列名特征选择正确的表格，而不是盲目选最大的
+                # [逻辑优化] 根据列名特征选择正确的表格
                 target_df = None
-                
-                # Investing.com 特征列
-                investing_cols = ['日期', '收盘', '交易量']
-                # 东方财富 特征列
-                eastmoney_cols = ['月份', '时间', '发布日期']
                 
                 for df in dfs:
                     # 清洗列名
                     df.columns = [str(c).replace(" ", "").replace("\n", "").strip() for c in df.columns]
-                    col_str = "".join(df.columns)
                     
                     if name == "恒生医疗保健指数":
                         # 检查是否包含关键列
@@ -253,13 +272,10 @@ class MacroDataScraper:
 
                         # 构造最终 dict
                         keep_cols = ['_std_date'] + list(available_map.values())
-                        # 确保不重复
                         keep_cols = list(dict.fromkeys(keep_cols))
-                        # 过滤 df 中存在的列
                         final_cols = [c for c in keep_cols if c in df.columns]
                         df = df[final_cols]
                         
-                        # 映射回统一的 '日期'
                         df.rename(columns={'_std_date': '日期'}, inplace=True)
 
                     elif name == "中国_南向资金":
