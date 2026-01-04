@@ -73,7 +73,8 @@ END_DATE = NOW_CN.strftime("%Y-%m-%d")
 # 任务组 1: 全球市场 (指数.json)
 # ------------------------------------------------
 TARGETS_GLOBAL = {
-    "纳斯达克":     {"ak": ".IXIC",   "yf": "^IXIC",    "type": "index_us"},
+    # [修改] 纳斯达克代码变更为 NDX (纳指100)
+    "纳斯达克":     {"ak": ".NDX",    "yf": "^NDX",     "type": "index_us"},
     "标普500":      {"ak": ".INX",    "yf": "^GSPC",    "type": "index_us"},
     "恒生科技":     {"ak": "HSTECH",  "yf": "^HSTECH",  "type": "index_hk"},
     "恒生指数":     {"ak": "HSI",     "yf": "^HSI",     "type": "index_hk"},
@@ -156,6 +157,13 @@ TARGETS_HK_PHARMA = {
     "药明康德":       {"ak": "02359", "yf": "2359.HK", "type": "stock_hk"},
     "翰森制药":       {"ak": "03692", "yf": "3692.HK", "type": "stock_hk"},
     "科伦博泰生物-B": {"ak": "06990", "yf": "6990.HK", "type": "stock_hk"},
+}
+
+# ------------------------------------------------
+# [新增] 任务组 6: 恒生医疗保健指数
+# ------------------------------------------------
+TARGETS_HK_HEALTHCARE = {
+    "恒生医疗保健指数": {"ak": "HSHCI", "yf": "^HSHCI", "type": "index_hk"},
 }
 
 # 环境变量 (参考 data_provider.py 的命名)
@@ -543,6 +551,13 @@ def get_all_kline_data():
     all_data_collection["data"]["港股创新药"] = data_hk
     all_ma_data.extend(ma_hk)
     all_status_logs.extend(logs_hk)
+    
+    # [新增] 6. 抓取恒生医疗保健指数
+    # 单独作为一个项放到最终的 json 中 (key="恒生医疗保健指数")
+    data_hc, ma_hc, logs_hc = fetch_group_data(fetcher, TARGETS_HK_HEALTHCARE, "恒生医疗保健指数")
+    all_data_collection["data"]["恒生医疗保健指数"] = data_hc
+    all_ma_data.extend(ma_hc)
+    all_status_logs.extend(logs_hc)
     
     # 将汇总的均线数据存入
     all_data_collection["ma_data"] = all_ma_data
