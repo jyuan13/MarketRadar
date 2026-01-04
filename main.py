@@ -228,18 +228,22 @@ def main():
         ma_data_list = []
         all_status_logs.append({'name': 'kline_module', 'status': False, 'error': str(e)})
 
-    # [Step 3.5 - 修复回补] 检查恒生医疗保健指数是否缺失，如缺失则尝试从 Selenium 数据中回补
-    # 原因：MarketRadar.py 的 API 可能失败，但 scrape_economy_selenium 已成功抓取
+    # [Step 3.5 - 修复回补] 检查恒生医疗保健指数是否缺失或为空，如缺失则尝试从 Selenium 数据中回补
+    # 原因：MarketRadar.py 的 API 可能失败(返回空列表)，但 scrape_economy_selenium 已成功抓取
     hshci_key = "恒生医疗保健指数"
     if "data" not in kline_data_dict:
         kline_data_dict["data"] = {}
-        
-    if hshci_key not in kline_data_dict["data"]:
+    
+    # 关键修复: 不仅检查 key 是否存在，还要检查数据是否为空 (API 失败常返回空列表 [])
+    is_missing = (hshci_key not in kline_data_dict["data"])
+    is_empty = (not kline_data_dict["data"].get(hshci_key))
+    
+    if is_missing or is_empty:
         # 尝试从 combined_macro 中的 'hk' 字段查找
         # scrape_economy_selenium 将其存放于: result['hk']['恒生医疗保健指数']
         hk_data = combined_macro.get("hk", {})
         if hshci_key in hk_data and hk_data[hshci_key]:
-            print(f"\n[Step 3.5] ⚡ 检测到 {hshci_key} K线缺失，正在从 Selenium 数据回补...")
+            print(f"\n[Step 3.5] ⚡ 检测到 {hshci_key} K线缺失/为空，正在从 Selenium 数据回补...")
             try:
                 raw_data = hk_data[hshci_key]
                 df_hshci = pd.DataFrame(raw_data)
@@ -271,6 +275,8 @@ def main():
                     df_hshci['date'] = df_hshci['date'].dt.strftime('%Y-%m-%d')
                     # 清洗 NaN
                     df_hshci = df_hshci.where(pd.notnull(df_hshci), None)
+                    
+                    # 覆盖原来的空数据
                     kline_data_dict["data"][hshci_key] = df_hshci.to_dict(orient='records')
                     
                     # 记录回补成功日志
