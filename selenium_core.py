@@ -18,13 +18,13 @@ from selenium.webdriver.support import expected_conditions as EC
 class MacroDataScraper:
     def __init__(self):
         # 目标数据源配置
+        # [修改] 已移除 "中国_南向资金" 以避免冗余和 0 记录问题
         self.targets = {
             "中国_CPI": "https://data.eastmoney.com/cjsj/cpi.html",
             "中国_PMI": "https://data.eastmoney.com/cjsj/pmi.html",
             "中国_PPI": "https://data.eastmoney.com/cjsj/ppi.html",
             "中国_货币供应量": "https://data.eastmoney.com/cjsj/hbgyl.html",
             "中国_LPR": "https://data.eastmoney.com/cjsj/globalRateLPR.html",
-            "中国_南向资金": "https://data.eastmoney.com/hsgtV2/hsgtDetail/scgkDetail_nx.html", 
             "美国_ISM制造业PMI": "https://data.eastmoney.com/cjsj/foreign_0_0.html",
             "美国_ISM非制造业指数": "https://data.eastmoney.com/cjsj/foreign_0_1.html",
             "美国_非农就业": "https://data.eastmoney.com/cjsj/foreign_0_2.html",
@@ -40,7 +40,6 @@ class MacroDataScraper:
             "中国_PPI": ("china", "PPI"),
             "中国_货币供应量": ("china", "货币供应量"),
             "中国_LPR": ("china", "LPR"),
-            "中国_南向资金": ("china", "南向资金净流入"), 
             "美国_ISM制造业PMI": ("usa", "ISM_制造业PMI"),
             "美国_ISM非制造业指数": ("usa", "ISM_非制造业PMI"),
             "美国_非农就业": ("usa", "非农就业人数"),
@@ -318,6 +317,7 @@ class MacroDataScraper:
                     df['_std_date'] = df['_std_date'].dt.strftime('%Y-%m-%d')
                     df = df.replace({'-': None, 'nan': None})
                     
+                    # [修改] 南向资金逻辑已从 targets 移除，这里的清理逻辑仅为防御性保留
                     if name == "中国_南向资金":
                         df = df.where(pd.notnull(df), None)
                         keep_cols = ['_std_date']

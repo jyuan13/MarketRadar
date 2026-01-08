@@ -4,6 +4,7 @@ import sys
 import time
 import math
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -20,6 +21,19 @@ import scrape_economy_selenium
 OUTPUT_FILENAME = "MarketRadar_Report.json"
 LOG_FILENAME = "market_data_status.txt"
 TZ_CN = ZoneInfo("Asia/Shanghai")
+
+class NpEncoder(json.JSONEncoder):
+    """
+    专门解决 'Object of type int64 is not JSON serializable' 错误的编码器
+    """
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
 
 def print_banner():
     print(r"""
@@ -40,6 +54,8 @@ def clean_and_round(data):
         if math.isnan(data) or math.isinf(data):
             return None
         return round(data, 2)
+    elif isinstance(data, (np.int64, np.int32)):
+        return int(data)
     else:
         return data
 
@@ -93,17 +109,18 @@ def save_compact_json(data, filename):
                         if isinstance(sub_val, list):
                             f.write('[\n')
                             for k, item in enumerate(sub_val):
-                                item_str = json.dumps(item, ensure_ascii=False)
+                                # 使用 NpEncoder 解决 int64 序列化错误
+                                item_str = json.dumps(item, ensure_ascii=False, cls=NpEncoder)
                                 comma = "," if k < len(sub_val) - 1 else ""
                                 f.write(f'            {item_str}{comma}\n')
                             f.write('        ]')
                         else:
-                            f.write(json.dumps(sub_val, ensure_ascii=False))
+                            f.write(json.dumps(sub_val, ensure_ascii=False, cls=NpEncoder))
                         if j < len(sub_keys) - 1: f.write(',\n')
                         else: f.write('\n')
                     f.write('    }')
                 else:
-                    f.write(json.dumps(val, ensure_ascii=False))
+                    f.write(json.dumps(val, ensure_ascii=False, cls=NpEncoder))
                 if i < len(keys) - 1: f.write(',\n')
                 else: f.write('\n')
             f.write('}')
@@ -220,38 +237,7 @@ def main():
         ma_data_dict = {"general": [], "commodities": []}
         all_status_logs.append({'name': 'kline_module', 'status': False, 'error': str(e)})
 
-    # [Step 3.5] 处理恒生医疗保健指数
-    hshci_key = "恒生医疗保健指数"
-    hk_data = combined_macro.get("hk", {})
-    
-    if "data" in kline_data_dict and kline_data_dict["data"]:
-        if hshci_key in kline_data_dict["data"]:
-            del kline_data_dict["data"][hshci_key]
-            print(f"🧹 已从 market_klines 字段移除 {hshci_key} (仅保留 hk 字段数据，防止双份输出)")
-
-    if hshci_key in hk_data and hk_data[hshci_key]:
-        print(f"\n[Step 3.5] ⚡ 正在基于 Selenium 数据计算 {hshci_key} 均线...")
-        try:
-            raw_data = hk_data[hshci_key]
-            df_hshci = pd.DataFrame(raw_data)
-            
-            if '日期' in df_hshci.columns:
-                df_hshci.rename(columns={'日期': 'date'}, inplace=True)
-            
-            df_hshci['name'] = hshci_key
-            
-            for col in ['close', 'open', 'high', 'low', 'volume']:
-                if col in df_hshci.columns:
-                    df_hshci[col] = pd.to_numeric(df_hshci[col], errors='coerce')
-
-            if 'date' in df_hshci.columns:
-                 df_hshci['date'] = pd.to_datetime(df_hshci['date'])
-                 hshci_ma_list = utils.calculate_ma(df_hshci)
-                 if hshci_ma_list:
-                     ma_data_dict["general"].extend(hshci_ma_list)
-                     print(f"✅ {hshci_key} 均线计算完成")
-        except Exception as e_ma:
-             print(f"⚠️ {hshci_key} 均线计算失败: {e_ma}")
+    # [Deleted] Step 3.5 恒生医疗保健指数逻辑已移除
 
     print("\n[Step 4/4] 获取越南胡志明指数 (Investing.com)...")
     try:

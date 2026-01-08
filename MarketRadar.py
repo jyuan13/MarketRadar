@@ -129,9 +129,7 @@ TARGETS_HK_PHARMA = {
     "科伦博泰生物-B": {"ak": "06990", "yf": "6990.HK", "type": "stock_hk"},
 }
 
-TARGETS_HK_HEALTHCARE = {
-    "恒生医疗保健指数": {"ak": "HSHCI", "yf": "^HSHCI", "type": "index_hk"},
-}
+# [Deleted] TARGETS_HK_HEALTHCARE 已移除 (避免 AkShare 报错)
 
 TARGETS_STAR50_ETF = {
     "科创50ETF": {"ak": "588000", "yf": "588000.SS", "type": "etf_zh"},
@@ -224,11 +222,7 @@ def get_all_kline_data():
     all_data_collection["ma_data"]["general"].extend(ma_hk)
     all_status_logs.extend(logs_hk)
     
-    # 6. 抓取恒生医疗保健指数
-    data_hc, ma_hc, logs_hc = market_core.fetch_group_data(fetcher, TARGETS_HK_HEALTHCARE, "恒生医疗保健指数", REPORT_START_DATE, END_DATE)
-    all_data_collection["data"]["恒生医疗保健指数"] = data_hc
-    all_data_collection["ma_data"]["general"].extend(ma_hc)
-    all_status_logs.extend(logs_hc)
+    # [Deleted] 6. 抓取恒生医疗保健指数 (已移除)
 
     # 7. 抓取科创50 ETF
     data_star_etf, ma_star_etf, logs_star_etf = market_core.fetch_group_data(fetcher, TARGETS_STAR50_ETF, "科创50ETF", REPORT_START_DATE, END_DATE)
