@@ -41,7 +41,7 @@ def fetch_yf_data(ticker, name, days=1):
     """yfinance 获取数据"""
     try:
         t = yf.Ticker(ticker)
-        # 如果需要多天数据，扩大获取范围以确保数量足够 (例如取1个月)
+        # 如果需要多天数据，扩大获取范围以确保数量足够
         period = "1mo" if days > 1 else "5d"
         hist = t.history(period=period)
         
@@ -294,42 +294,42 @@ def fetch_vietnam_index_klines():
         return [], str(e)
 
 # ==============================================================================
-# 新增: 适配 AKShare 其他金融接口 (南向, 科创50相关)
+# AKShare 特定接口适配 (修复后)
 # ==============================================================================
 
 def fetch_southbound_flow():
-    """获取南向资金净流入 (近6个月)"""
+    """获取南向资金净流入 (近6个月) - 使用 stock_hsgt_hist_em"""
     print("   -> 获取南向资金数据 (AKShare)...")
     try:
-        # symbol="南下" 对应沪深港通南向资金
-        df = ak.stock_hsgt_south_net_flow_in_em(symbol="南下")
+        # 修正接口: stock_hsgt_hist_em (symbol="南向资金")
+        df = ak.stock_hsgt_hist_em(symbol="南向资金")
         if df.empty:
             return [], "AKShare returned empty dataframe"
         
-        # 假设返回列包含日期和值，这里做通用处理
-        # AKShare通常返回: date, value
-        # 强制重命名以防万一
-        df.columns = ['date', 'value']
+        # 结果列名通常包含: 日期, 当日成交净买额, 领涨股 等
+        # 我们需要 '日期' 和 '当日成交净买额'
+        if '日期' not in df.columns or '当日成交净买额' not in df.columns:
+            return [], f"Unexpected columns: {df.columns.tolist()}"
+            
+        df['日期'] = pd.to_datetime(df['日期'])
+        df = df.sort_values('日期')
         
-        df['date'] = pd.to_datetime(df['date'])
-        df = df.sort_values('date')
-        
-        # 取近6个月 (约180天)
+        # 取近6个月
         cutoff_date = datetime.datetime.now() - datetime.timedelta(days=180)
-        df = df[df['date'] >= cutoff_date]
+        df = df[df['日期'] >= cutoff_date]
         
-        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        df['日期'] = df['日期'].dt.strftime('%Y-%m-%d')
+        # 转换单位，原单位通常为"亿元" (根据文档输出)，这里保持原值，但在前端需注意单位
+        # 或者转换为万元/元？ akshare文档显示单位是 亿元。
+        # 我们存入 dict
         
-        # 转换为 list of dicts
         data = []
         for _, row in df.iterrows():
             data.append({
-                "日期": row['date'],
-                "净流入": row['value']
+                "日期": row['日期'],
+                "净流入(亿元)": row['当日成交净买额']
             })
         
-        # 倒序排列 (最新的在前，符合项目习惯)
         data.sort(key=lambda x: x["日期"], reverse=True)
         return data, None
     except Exception as e:
@@ -345,9 +345,6 @@ def fetch_star50_valuation():
         if df.empty:
             return [], "AKShare returned empty dataframe"
         
-        # 常见列名: 日期, 市盈率1(PE), 市盈率2(PE-TTM), 股息率1, 股息率2, 市净率1(PB)
-        # 我们主要关注 PE 和 PB
-        # 这里的列名通常是中文
         df['日期'] = pd.to_datetime(df['日期'])
         df = df.sort_values('日期')
         
@@ -359,14 +356,12 @@ def fetch_star50_valuation():
         data = []
         for _, row in df.iterrows():
             item = {"日期": row['日期']}
-            # 尝试提取 PE (通常是 '市盈率1' 或 '市盈率(PE)')
             for col in df.columns:
-                if "市盈率" in col and "1" in col: # 优先取 PE1
+                if "市盈率" in col and "1" in col:
                     item["PE"] = row[col]
                 elif "市净率" in col and "1" in col:
                     item["PB"] = row[col]
             
-            # 如果没找到带1的，尝试模糊匹配
             if "PE" not in item:
                 for col in df.columns:
                     if "市盈率" in col: item["PE"] = row[col]; break
@@ -383,34 +378,59 @@ def fetch_star50_valuation():
         return [], str(e)
 
 def fetch_star50_margin():
-    """获取科创50ETF融资融券数据 (近6个月)"""
-    print("   -> 获取科创50融资融券数据 (AKShare)...")
+    """
+    获取科创50ETF融资融券数据 (近15天)
+    接口: stock_margin_detail_sse(date='YYYYMMDD')
+    说明: 该接口不支持直接传 symbol 获取历史，只能传 date 获取全市场。
+    策略: 循环查询最近的交易日，过滤出 588000。
+    """
+    print("   -> 获取科创50融资融券数据 (Loop Date)...")
+    target_symbol = "588000" # 科创50ETF
+    data_list = []
+    
     try:
-        # 科创50ETF代码 588000
-        df = ak.stock_margin_detail_sse(symbol="588000")
-        if df.empty:
-            return [], "AKShare returned empty dataframe"
+        # 尝试回溯最近 10 天，找到有数据的交易日
+        days_checked = 0
+        days_found = 0
+        current = datetime.datetime.now()
         
-        # 列名: 信用交易日期, 融资余额, 融券余额, ...
-        df['信用交易日期'] = pd.to_datetime(df['信用交易日期'])
-        df = df.sort_values('信用交易日期')
-        
-        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=180)
-        df = df[df['信用交易日期'] >= cutoff_date]
-        
-        df['信用交易日期'] = df['信用交易日期'].dt.strftime('%Y-%m-%d')
-        
-        data = []
-        for _, row in df.iterrows():
-            data.append({
-                "日期": row['信用交易日期'],
-                "融资余额": row.get('融资余额'),
-                "融券余额": row.get('融券余额'),
-                "融资买入额": row.get('融资买入额')
-            })
+        while days_found < 5 and days_checked < 20: # 最多查20天，找5个数据点
+            date_str = current.strftime("%Y%m%d")
+            # 跳过周末 (简单判断)
+            if current.weekday() < 5: 
+                try:
+                    # 获取当日全市场数据
+                    df = ak.stock_margin_detail_sse(date=date_str)
+                    if not df.empty:
+                        # 过滤目标代码
+                        # 注意：列名可能是 '标的证券代码'，且类型可能是数字或字符串
+                        # 统一转为字符串比较
+                        df['标的证券代码'] = df['标的证券代码'].astype(str)
+                        row = df[df['标的证券代码'] == target_symbol]
+                        
+                        if not row.empty:
+                            r = row.iloc[0]
+                            item = {
+                                "日期": current.strftime("%Y-%m-%d"),
+                                "融资余额": r.get('融资余额'),
+                                "融券余额": r.get('融券余额'),
+                                "融资买入额": r.get('融资买入额')
+                            }
+                            data_list.append(item)
+                            days_found += 1
+                except Exception:
+                    # 可能是非交易日或接口报错，跳过
+                    pass
             
-        data.sort(key=lambda x: x["日期"], reverse=True)
-        return data, None
+            current -= datetime.timedelta(days=1)
+            days_checked += 1
+            time.sleep(0.5) # 避免请求过快
+
+        if not data_list:
+            return [], "No margin data found in recent 20 days"
+
+        return data_list, None
+
     except Exception as e:
         print(f"科创50融资融券获取失败: {e}")
         return [], str(e)
@@ -420,7 +440,6 @@ def fetch_star50_realtime_vol_ratio():
     print("   -> 获取科创50ETF实时量比 (AKShare)...")
     try:
         df = ak.fund_etf_spot_em()
-        # 过滤 588000
         target = df[df['代码'] == '588000']
         if target.empty:
             return None, "Symbol 588000 not found in spot data"

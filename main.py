@@ -132,8 +132,34 @@ def write_status_log(logs, filename):
         print(f"❌ 日志写入失败: {e}")
         return False
 
-def generate_email_body_summary(logs):
-    lines = ["数据获取状态汇总:"]
+def generate_signals_summary(ma_data_dict):
+    """
+    生成技术指标信号摘要
+    """
+    lines = []
+    
+    # 合并两个列表
+    all_ma = ma_data_dict.get("general", []) + ma_data_dict.get("commodities", [])
+    
+    signals_found = False
+    lines.append("\n📈 技术指标信号扫描:")
+    lines.append("-" * 30)
+    
+    for item in all_ma:
+        name = item.get('name', 'Unknown')
+        signals = item.get('Signals', [])
+        
+        if signals:
+            signals_found = True
+            lines.append(f"🔴 [{name}]: {', '.join(signals)}")
+            
+    if not signals_found:
+        lines.append("今日无特殊技术信号。")
+        
+    return "\n".join(lines)
+
+def generate_email_body_summary(logs, signal_summary):
+    lines = ["📊 数据获取状态汇总:"]
     lines.append("-" * 30)
     
     success_count = sum(1 for l in logs if l['status'])
@@ -145,6 +171,8 @@ def generate_email_body_summary(logs):
     for log in logs:
         status_icon = "✅" if log['status'] else "❌"
         lines.append(f"{status_icon} {log['name']}")
+    
+    lines.append("\n" + signal_summary)
     
     return "\n".join(lines)
 
@@ -175,7 +203,7 @@ def main():
 
     combined_macro = deep_merge(base_macro, selenium_macro)
 
-    print("\n[Step 3/4] 获取 K线数据 & 计算均线...")
+    print("\n[Step 3/4] 获取 K线数据 & 计算均线 & 技术指标...")
     try:
         kline_result, logs_klines = MarketRadar.get_all_kline_data()
         all_status_logs.extend(logs_klines)
@@ -272,13 +300,18 @@ def main():
                 cleaned_logs.append(log)
     
     write_status_log(cleaned_logs, LOG_FILENAME)
+    
+    # 生成技术信号摘要
+    signal_summary = generate_signals_summary(ma_data_dict)
+    print(signal_summary)
 
     if save_compact_json(final_data, OUTPUT_FILENAME):
         try:
             email_subject = f"MarketRadar全量日报_{datetime.now(TZ_CN).strftime('%Y-%m-%d')}"
-            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观(Selenium), 汇率/国债(Online), K线(Stock/VNI/科创50)\n\n"
-            status_body = generate_email_body_summary(cleaned_logs)
-            email_body = base_body + status_body
+            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观(Selenium), 汇率/国债(Online), K线(Stock/VNI/科创50), 信号扫描(MyTT)\n\n"
+            
+            email_body = generate_email_body_summary(cleaned_logs, signal_summary)
+            email_body = base_body + email_body
             
             attachments = [OUTPUT_FILENAME, LOG_FILENAME]
             

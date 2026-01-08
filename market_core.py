@@ -6,9 +6,22 @@ import requests
 import random
 import time
 import socket
+import numpy as np # MyTT 需要 numpy
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
 import utils
+
+# === 尝试导入 MyTT (假设用户已放置文件) ===
+try:
+    # 优先尝试作为模块导入
+    import MyTT 
+except ImportError:
+    try:
+        # 尝试 import indicators (如果用户重命名了)
+        import indicators as MyTT
+    except ImportError:
+        MyTT = None
+        print("⚠️ Warning: MyTT.py not found. Technical indicators will be skipped.")
 
 # === 邮件相关库 ===
 import smtplib
@@ -17,14 +30,78 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-# -----------------------------------------------------------------------------
-# 配置区域（需要传递给 MarketRadar.py 使用的也可以放在这里，或者保留在原处，
-# 这里主要放 Fetcher 逻辑和通用函数）
-# -----------------------------------------------------------------------------
-
 ENV_KEYS = {
     "FMP": os.environ.get("FMP_API_Key"),
 }
+
+# ========================================================
+# 技术指标计算辅助函数
+# ========================================================
+def calculate_tech_indicators(df):
+    """
+    使用 MyTT 计算 MACD, KDJ, RSI
+    df: 必须包含 'close', 'high', 'low', 'open' 列 (小写)
+    """
+    if MyTT is None or df.empty:
+        return {}
+    
+    try:
+        # MyTT 需要 numpy array 或 pandas series
+        CLOSE = df['close'].values
+        HIGH = df['high'].values
+        LOW = df['low'].values
+        OPEN = df['open'].values
+        
+        # 1. MACD (12, 26, 9)
+        # MyTT.MACD 返回: DIF, DEA, MACD
+        dif, dea, macd_bar = MyTT.MACD(CLOSE)
+        
+        # 2. KDJ (9, 3, 3)
+        # MyTT.KDJ 返回: K, D, J
+        k, d, j = MyTT.KDJ(CLOSE, HIGH, LOW)
+        
+        # 3. RSI (6)
+        # MyTT.RSI 返回: RSI
+        rsi6 = MyTT.RSI(CLOSE, 6)
+        
+        # 取最新值 (最后一个)
+        latest_idx = -1
+        
+        # 简单的信号判断
+        signals = []
+        
+        # MACD 金叉: 昨天 DIF < DEA, 今天 DIF > DEA
+        if len(dif) > 1:
+            if dif[-2] < dea[-2] and dif[-1] > dea[-1]:
+                signals.append("MACD金叉")
+            elif dif[-2] > dea[-2] and dif[-1] < dea[-1]:
+                signals.append("MACD死叉")
+                
+        # KDJ 金叉
+        if len(k) > 1:
+            if k[-2] < d[-2] and k[-1] > d[-1]:
+                signals.append("KDJ金叉")
+        
+        # RSI 超买超卖
+        if rsi6[-1] > 80:
+            signals.append("RSI超买")
+        elif rsi6[-1] < 20:
+            signals.append("RSI超卖")
+
+        return {
+            "MACD": round(float(macd_bar[-1]), 4),
+            "DIF": round(float(dif[-1]), 4),
+            "DEA": round(float(dea[-1]), 4),
+            "K": round(float(k[-1]), 2),
+            "D": round(float(d[-1]), 2),
+            "J": round(float(j[-1]), 2),
+            "RSI6": round(float(rsi6[-1]), 2),
+            "Signals": signals
+        }
+
+    except Exception as e:
+        print(f"Error calculating indicators: {e}")
+        return {}
 
 class MarketFetcher:
     def __init__(self, fetch_start_date, end_date):
@@ -253,22 +330,37 @@ def fetch_group_data(fetcher, targets, group_name, report_start_date, end_date):
     
     def fetch_task(name, config):
         try:
+            # 1. 获取长周期数据 (用于计算均线和指标)
             df = fetcher.get_kline_data(name, config)
             if df.empty:
                 return None, None, {'name': name, 'status': False, 'error': "Data source returned empty after retries"}
             
+            # 确保日期升序
             df = df.sort_values(by='date', ascending=True)
 
+            # 2. 计算均线
             ma_info_list = utils.calculate_ma(df) 
             ma_info = ma_info_list[0] if ma_info_list else None
+            
+            # 3. 计算技术指标 (MyTT) - 取最新的一个点
+            tech_indicators = calculate_tech_indicators(df)
+            
+            # 如果有均线信息，把技术指标合并进去
+            if ma_info:
+                ma_info.update(tech_indicators)
 
+            # 4. 切片为用户配置的短周期 (用于展示 K线图)
             df_slice = df[(df['date'] >= pd.to_datetime(report_start_date)) & (df['date'] <= pd.to_datetime(end_date))].copy()
             
-            if df_slice.empty:
-                return None, ma_info, {'name': name, 'status': True, 'error': None}
+            # 格式化日期
+            if not df_slice.empty:
+                df_slice['date'] = df_slice['date'].dt.strftime('%Y-%m-%d')
+                kline_records = df_slice.to_dict(orient='records')
+            else:
+                kline_records = []
             
-            df_slice['date'] = df_slice['date'].dt.strftime('%Y-%m-%d')
-            kline_records = df_slice.to_dict(orient='records')
+            # 将技术指标也附加到 K线记录的最后一条（可选，或者前端只展示最新）
+            # 这里我们主要依赖 ma_info (它其实是 latest_info) 来传递指标
             
             return kline_records, ma_info, {'name': name, 'status': True, 'error': None}
 
@@ -282,7 +374,7 @@ def fetch_group_data(fetcher, targets, group_name, report_start_date, end_date):
         for future in as_completed(future_to_name):
             name = future_to_name[future]
             try:
-                result = future.result(timeout=15)
+                result = future.result(timeout=20) # 稍微增加超时时间
                 klines, ma, status = result
                 
                 status_logs.append(status)
@@ -290,14 +382,14 @@ def fetch_group_data(fetcher, targets, group_name, report_start_date, end_date):
                 if klines:
                     kline_list.extend(klines)
                 else:
-                    print(f"⚠️ 警告: 无法获取 {name} 的K线数据")
+                    print(f"⚠️ 警告: 无法获取 {name} 的K线数据 (范围为空?)")
                 
                 if ma:
                     ma_list.append(ma)
                     
             except TimeoutError:
-                print(f" 💀 严重超时: 获取 {name} 超过15秒无响应，强制跳过！")
-                status_logs.append({'name': name, 'status': False, 'error': "Thread timed out (15s)"})
+                print(f" 💀 严重超时: 获取 {name} 超过20秒无响应，强制跳过！")
+                status_logs.append({'name': name, 'status': False, 'error': "Thread timed out"})
             except Exception as e:
                 print(f"❌ 处理 {name} 结果时出错: {e}")
                 status_logs.append({'name': name, 'status': False, 'error': f"Processing error: {str(e)}"})
