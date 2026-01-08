@@ -5,7 +5,7 @@ import time
 import math
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +21,10 @@ import scrape_economy_selenium
 OUTPUT_FILENAME = "MarketRadar_Report.json"
 LOG_FILENAME = "market_data_status.txt"
 TZ_CN = ZoneInfo("Asia/Shanghai")
+
+# 定义报告的时间范围（用于截取最终展示的数据）
+# 计算均线需要更长的数据，但报告只展示近期
+REPORT_DAYS = 20
 
 class NpEncoder(json.JSONEncoder):
     """
@@ -193,6 +197,17 @@ def generate_email_body_summary(logs, signal_summary):
     
     return "\n".join(lines)
 
+def parse_chinese_date(date_str):
+    """
+    解析 'YYYY年MM月DD日' 或 'YYYY-MM-DD' 格式的日期
+    """
+    try:
+        if '年' in str(date_str):
+            return datetime.strptime(str(date_str).strip(), '%Y年%m月%d日')
+        return pd.to_datetime(date_str)
+    except:
+        return pd.to_datetime(date_str, errors='coerce')
+
 def main():
     start_time = time.time()
     print_banner()
@@ -237,7 +252,55 @@ def main():
         ma_data_dict = {"general": [], "commodities": []}
         all_status_logs.append({'name': 'kline_module', 'status': False, 'error': str(e)})
 
-    # [Deleted] Step 3.5 恒生医疗保健指数逻辑已移除
+    # [Step 3.5] 处理恒生医疗保健指数 (恢复并修复逻辑)
+    # 策略: 抓取时使用长数据(已由selenium_core完成) -> 计算均线 -> 切片保留最近20天放入报告
+    hshci_key = "恒生医疗保健指数"
+    hk_data = combined_macro.get("hk", {})
+    
+    # 清理: 如果 market_klines 里有(来自AkShare失败的空数据), 先删掉
+    if "data" in kline_data_dict and kline_data_dict["data"]:
+        if hshci_key in kline_data_dict["data"]:
+            del kline_data_dict["data"][hshci_key]
+            print(f"🧹 已从 market_klines 字段移除 {hshci_key} (仅保留 hk 字段数据，防止双份输出)")
+
+    if hshci_key in hk_data and hk_data[hshci_key]:
+        print(f"\n[Step 3.5] ⚡ 正在基于 Selenium 数据计算 {hshci_key} 均线...")
+        try:
+            raw_data = hk_data[hshci_key]
+            df_hshci = pd.DataFrame(raw_data)
+            
+            # 1. 日期标准化 (处理中文日期)
+            if '日期' in df_hshci.columns:
+                df_hshci['date'] = df_hshci['日期'].apply(parse_chinese_date)
+            elif 'date' in df_hshci.columns:
+                df_hshci['date'] = pd.to_datetime(df_hshci['date'])
+            
+            # 2. 数值转换
+            df_hshci['name'] = hshci_key
+            for col in ['close', 'open', 'high', 'low', 'volume']:
+                if col in df_hshci.columns:
+                    df_hshci[col] = pd.to_numeric(df_hshci[col], errors='coerce')
+
+            # 3. 计算均线 (基于完整历史数据)
+            if 'date' in df_hshci.columns:
+                 # 计算均线
+                 hshci_ma_list = utils.calculate_ma(df_hshci)
+                 if hshci_ma_list:
+                     ma_data_dict["general"].extend(hshci_ma_list)
+                     print(f"✅ {hshci_key} 均线计算完成")
+                 
+                 # 4. 数据切片 (仅保留最近 20 天，修复"时间区间太长"问题)
+                 cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=REPORT_DAYS)
+                 df_slice = df_hshci[df_hshci['date'] >= cutoff_date].copy()
+                 df_slice['date'] = df_slice['date'].dt.strftime('%Y-%m-%d')
+                 
+                 # 替换 combined_macro 中的长数据为切片后的短数据
+                 sliced_records = df_slice.to_dict(orient='records')
+                 combined_macro['hk'][hshci_key] = sliced_records
+                 print(f"✂️ {hshci_key} 数据已切片 (保留最近 {len(sliced_records)} 条)")
+
+        except Exception as e_ma:
+             print(f"⚠️ {hshci_key} 均线计算或切片失败: {e_ma}")
 
     print("\n[Step 4/4] 获取越南胡志明指数 (Investing.com)...")
     try:

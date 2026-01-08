@@ -298,7 +298,7 @@ def fetch_vietnam_index_klines():
 # ==============================================================================
 
 def fetch_southbound_flow():
-    """获取南向资金净流入 (近6个月) - 使用 stock_hsgt_hist_em"""
+    """获取南向资金净流入 (近20天) - 使用 stock_hsgt_hist_em"""
     print("   -> 获取南向资金数据 (AKShare)...")
     try:
         # 修正接口: stock_hsgt_hist_em (symbol="南向资金")
@@ -314,8 +314,8 @@ def fetch_southbound_flow():
         df['日期'] = pd.to_datetime(df['日期'])
         df = df.sort_values('日期')
         
-        # 取近6个月
-        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=180)
+        # [修改] 改为近 20 天，修复报告过长问题 (原为180天)
+        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=20)
         df = df[df['日期'] >= cutoff_date]
         
         df['日期'] = df['日期'].dt.strftime('%Y-%m-%d')
