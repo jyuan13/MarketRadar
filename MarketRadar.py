@@ -40,7 +40,7 @@ FETCH_START_DATE = (NOW_CN - timedelta(days=500)).strftime("%Y-%m-%d")
 END_DATE = NOW_CN.strftime("%Y-%m-%d")
 
 # ------------------------------------------------
-# 任务组 1.1: 指数 (Indices) - 从原 TARGETS_GLOBAL 拆分
+# 任务组 1.1: 指数 (Indices)
 # ------------------------------------------------
 TARGETS_INDICES = {
     "纳斯达克":     {"ak": ".NDX",    "yf": "^NDX",     "type": "index_us"},
@@ -48,10 +48,12 @@ TARGETS_INDICES = {
     "恒生科技":     {"ak": "HSTECH",  "yf": "^HSTECH",  "type": "index_hk"},
     "恒生指数":     {"ak": "HSI",     "yf": "^HSI",     "type": "index_hk"},
     "VNM(ETF)":     {"ak": "VNM",     "yf": "VNM",      "type": "stock_us"},
+    # [新增] 美股生物科技 ETF (XBI)
+    "XBI(ETF)":     {"ak": "XBI",     "yf": "XBI",      "type": "stock_us"},
 }
 
 # ------------------------------------------------
-# 任务组 1.2: 大宗商品 (Commodities) - 从原 TARGETS_GLOBAL 拆分
+# 任务组 1.2: 大宗商品 (Commodities)
 # ------------------------------------------------
 TARGETS_COMMODITIES = {
     "黄金(COMEX)":  {"ak": "GC",      "yf": "GC=F",     "type": "future_foreign"},  
@@ -63,7 +65,7 @@ TARGETS_COMMODITIES = {
 }
 
 # ------------------------------------------------
-# 其他任务组保持不变
+# 其他任务组
 # ------------------------------------------------
 TARGETS_HSTECH_TOP20 = {
     "美团-W":       {"ak": "03690", "yf": "3690.HK", "type": "stock_hk"},
@@ -191,7 +193,7 @@ def get_all_kline_data():
     all_data_collection["ma_data"]["general"].extend(ma_idx)
     all_status_logs.extend(logs_idx)
 
-    # 1.2 抓取大宗商品 (Commodities) - 新增独立组
+    # 1.2 抓取大宗商品 (Commodities)
     data_comm, ma_comm, logs_comm = market_core.fetch_group_data(fetcher, TARGETS_COMMODITIES, "大宗商品", REPORT_START_DATE, END_DATE)
     all_data_collection["data"]["大宗商品"] = data_comm
     all_data_collection["ma_data"]["commodities"].extend(ma_comm)
