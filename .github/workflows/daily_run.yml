@@ -1,4 +1,4 @@
-name: MarketRadar Daily Run
+name: MarketRadar-Daily-Action
 
 on:
   schedule:
