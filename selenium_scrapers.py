@@ -16,7 +16,6 @@ import selenium_utils
 def fetch_cnn_fear_greed(name, url, chrome_options):
     """
     专门抓取 CNN Fear & Greed Index
-    结构变动频繁，使用非顺序的独立正则匹配。
     """
     max_retries = 5
     last_error = None
@@ -30,13 +29,12 @@ def fetch_cnn_fear_greed(name, url, chrome_options):
                 "source": """Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"""
             })
 
-            # 设置大窗口以确保桌面布局
             driver.set_window_size(1920, 1080)
             driver.set_page_load_timeout(45)
             driver.get(url)
 
             try:
-                # 滚动到底部，确保 Timeline 历史数据加载
+                # 滚动到底部
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(3) 
             except:
@@ -47,7 +45,7 @@ def fetch_cnn_fear_greed(name, url, chrome_options):
                     EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Timeline")
                 )
             except:
-                pass # 超时也继续尝试解析
+                pass 
             
             body_text = driver.find_element(By.TAG_NAME, "body").text
             normalized_text = re.sub(r'\s+', ' ', body_text).strip()
@@ -157,7 +155,7 @@ def fetch_cboe_data(name, url, chrome_options):
             records = []
             current_date = pd.Timestamp.now().strftime('%Y-%m-%d')
             
-            # 解析日期 (示例: 2026年1月9日)
+            # 解析日期
             date_match = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", normalized_text)
             if date_match:
                 try:
@@ -270,9 +268,219 @@ def fetch_fed_rate_monitor(name, url, chrome_options):
                     pass
     return name, [], last_error
 
-def fetch_investing_source(name, url, chrome_options):
+def fetch_ccfi_data(name, url, chrome_options):
     """
-    通用 Investing.com 表格抓取
+    [新增] 抓取中国出口集装箱运价指数 (CCFI)
+    全数据抓取：包含表头日期和所有航线数据
+    """
+    max_retries = 3
+    last_error = None
+    
+    for attempt in range(1, max_retries + 1):
+        print(f"🌍 [{name}] 第 {attempt}/{max_retries} 次尝试 (Selenium - CCFI)...")
+        driver = None
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": """Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"""
+            })
+            driver.set_page_load_timeout(45)
+            driver.get(url)
+            
+            # 等待表格加载
+            try:
+                WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
+            except:
+                print(f"⚠️ [{name}] 等待表格超时，尝试解析源码...")
+
+            html = driver.page_source
+            dfs = pd.read_html(StringIO(html))
+            
+            if not dfs:
+                raise ValueError("未找到表格数据")
+            
+            # 查找包含 "航线" 的表格
+            target_df = None
+            for df in dfs:
+                # 展平列名 (MultiIndex 处理)
+                cols = []
+                if isinstance(df.columns, pd.MultiIndex):
+                    for col in df.columns:
+                        cols.append(" ".join([str(c) for c in col]).strip())
+                else:
+                    cols = [str(c).strip() for c in df.columns]
+                
+                # 检查关键词
+                if any("航线" in c for c in cols) and any("涨跌" in c for c in cols):
+                    df.columns = cols
+                    target_df = df
+                    break
+            
+            if target_df is None:
+                raise ValueError("未找到 CCFI 运价指数表格")
+
+            # 提取表头中的日期
+            # 表头通常类似: "上期 2025-12-26", "本期 2026-01-09"
+            prev_date = None
+            curr_date = None
+            
+            for col in target_df.columns:
+                if "上期" in col:
+                    match = re.search(r"(\d{4}-\d{2}-\d{2})", col)
+                    if match: prev_date = match.group(1)
+                if "本期" in col:
+                    match = re.search(r"(\d{4}-\d{2}-\d{2})", col)
+                    if match: curr_date = match.group(1)
+            
+            # 如果没抓到日期，使用当天
+            if not curr_date:
+                curr_date = pd.Timestamp.now().strftime('%Y-%m-%d')
+
+            records = []
+            # 遍历每一行
+            # 期望列: 航线, 上期值, 本期值, 涨跌幅
+            # 由于列名可能复杂，我们按位置取 (假设结构固定: Col 0=航线, Col 1=上期, Col 2=本期, Col 3=涨跌)
+            # 过滤掉非数据行
+            
+            for _, row in target_df.iterrows():
+                route_name = str(row.iloc[0]).strip()
+                if "航线" in route_name: continue # 跳过标题行重复
+                
+                try:
+                    prev_val = float(str(row.iloc[1]).replace(',', ''))
+                    curr_val = float(str(row.iloc[2]).replace(',', ''))
+                    change_pct = float(str(row.iloc[3]).replace('%', '').replace(',', ''))
+                    
+                    records.append({
+                        "日期": curr_date,
+                        "航线": route_name,
+                        "本期指数": curr_val,
+                        "上期指数": prev_val,
+                        "上期日期": prev_date,
+                        "涨跌幅(%)": change_pct
+                    })
+                except:
+                    continue # 解析失败跳过该行
+
+            print(f"✅ [{name}] 抓取成功! 日期: {curr_date}, 获得 {len(records)} 条航线数据")
+            return name, records, None
+
+        except Exception as e:
+            last_error = str(e)
+            print(f"❌ [{name}] 失败: {str(e)[:100]}")
+            if attempt < max_retries:
+                time.sleep(2)
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+    return name, [], last_error
+
+def fetch_investing_economic_calendar(name, url, chrome_options, days_to_keep=150):
+    """
+    [新增] 抓取 Investing.com 财经日历数据 (如初请失业金)
+    结构: Release Date | Time | Actual | Forecast | Previous
+    """
+    max_retries = 3
+    last_error = None
+    
+    for attempt in range(1, max_retries + 1):
+        print(f"🌍 [{name}] 第 {attempt}/{max_retries} 次尝试 (Selenium - Calendar)...")
+        driver = None
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": """Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"""
+            })
+            driver.set_page_load_timeout(45)
+            driver.get(url)
+            
+            # 展开更多数据 (Show more) - 这是一个通常的做法，但Investing可能是直接加载长表或分页
+            # 尝试查找表格
+            try:
+                WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
+            except:
+                pass
+            
+            html = driver.page_source
+            dfs = pd.read_html(StringIO(html))
+            
+            target_df = None
+            for df in dfs:
+                cols = [str(c).lower() for c in df.columns]
+                # 关键列名: release date, actual, forecast
+                if any("release date" in c for c in cols) and any("actual" in c for c in cols):
+                    target_df = df
+                    break
+            
+            if target_df is None:
+                raise ValueError("未找到财经日历数据表格")
+            
+            # 清理数据
+            # 列名通常是 Release Date, Time, Actual, Forecast, Previous
+            df = target_df.copy()
+            # 统一列名
+            new_cols = {}
+            for c in df.columns:
+                c_str = str(c).strip()
+                if "Release Date" in c_str: new_cols[c] = "Release Date"
+                elif "Actual" in c_str: new_cols[c] = "Actual"
+                elif "Forecast" in c_str: new_cols[c] = "Forecast"
+                elif "Previous" in c_str: new_cols[c] = "Previous"
+            
+            df.rename(columns=new_cols, inplace=True)
+            
+            # 清洗日期: "Jan 08, 2026" -> Datetime
+            # 注意:有些行可能是空或 "(P)" 修正标记，需要处理
+            def parse_calendar_date(x):
+                try:
+                    # 移除括号内容 (e.g., revised markers)
+                    x = re.sub(r'\(.*?\)', '', str(x)).strip()
+                    return pd.to_datetime(x, format='%b %d, %Y')
+                except:
+                    return pd.NaT
+
+            if 'Release Date' not in df.columns:
+                raise ValueError("列名识别失败")
+
+            df['std_date'] = df['Release Date'].apply(parse_calendar_date)
+            df = df.dropna(subset=['std_date'])
+            
+            # 筛选时间范围
+            cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=days_to_keep)
+            df = df[df['std_date'] >= cutoff_date]
+            
+            records = []
+            for _, row in df.iterrows():
+                # 格式化输出
+                records.append({
+                    "日期": row['std_date'].strftime('%Y-%m-%d'),
+                    "实际值": str(row.get('Actual', '')).strip(),
+                    "预测值": str(row.get('Forecast', '')).strip(),
+                    "前值": str(row.get('Previous', '')).strip()
+                })
+            
+            print(f"✅ [{name}] 抓取成功! 获得 {len(records)} 条记录 (近 {days_to_keep} 天)")
+            return name, records, None
+
+        except Exception as e:
+            last_error = str(e)
+            print(f"❌ [{name}] 失败: {str(e)[:100]}")
+            if attempt < max_retries:
+                time.sleep(2)
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+    return name, [], last_error
+
+def fetch_investing_source(name, url, chrome_options, days_to_keep=180):
+    """
+    通用 Investing.com 历史数据抓取
     """
     max_retries = 5
     last_error = None
@@ -325,7 +533,7 @@ def fetch_investing_source(name, url, chrome_options):
             df = df.dropna(subset=['_std_date'])
             df['_std_date'] = pd.to_datetime(df['_std_date'])
             
-            cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=180)
+            cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=days_to_keep)
             df = df[df['_std_date'] >= cutoff_date]
             df['_std_date'] = df['_std_date'].dt.strftime('%Y-%m-%d')
             
@@ -436,7 +644,6 @@ def fetch_generic_source(name, url, chrome_options, days_to_keep=180):
                 df['_std_date'] = df['_std_date'].dt.strftime('%Y-%m-%d')
                 df = df.replace({'-': None, 'nan': None})
                 
-                # 防御性逻辑
                 if name == "中国_南向资金":
                     df = df.where(pd.notnull(df), None)
                     keep_cols = ['_std_date']

@@ -25,7 +25,10 @@ class MacroDataScraper:
             "恒生医疗保健指数": "https://cn.investing.com/indices/hang-seng-healthcare-historical-data",
             "CNN_FearGreed": "https://edition.cnn.com/markets/fear-and-greed",
             "CBOE_PutCallRatio": "https://www.cboe.com/us/options/market_statistics/daily/",
-            "Fed_Rate_Monitor": "https://www.investing.com/central-banks/fed-rate-monitor"
+            "Fed_Rate_Monitor": "https://www.investing.com/central-banks/fed-rate-monitor",
+            "CCFI_运价指数": "https://www.sse.net.cn/index/singleIndex?indexType=ccfi",
+            "BDI_波罗的海指数": "https://www.investing.com/indices/baltic-dry-historical-data",
+            "USA_Initial_Jobless": "https://www.investing.com/economic-calendar/initial-jobless-claims-294"
         }
 
         self.key_mapping = {
@@ -43,7 +46,10 @@ class MacroDataScraper:
             "恒生医疗保健指数": ("hk", "恒生医疗保健指数"),
             "CNN_FearGreed": ("market_fx", "CNN_FearGreed"),
             "CBOE_PutCallRatio": ("market_fx", "CBOE_PutCallRatio"),
-            "Fed_Rate_Monitor": ("usa", "Fed_Rate_Monitor")
+            "Fed_Rate_Monitor": ("usa", "Fed_Rate_Monitor"),
+            "CCFI_运价指数": ("china", "CCFI_运价指数"),
+            "BDI_波罗的海指数": ("market_fx", "BDI_波罗的海指数"),
+            "USA_Initial_Jobless": ("usa", "Initial_Jobless_Claims")
         }
         
         self.results = {}
@@ -67,9 +73,20 @@ class MacroDataScraper:
         """
         调度器：根据 name 分发到具体的 scraper 函数
         """
+        # 1. Investing.com 常规历史数据
         if name == "恒生医疗保健指数":
             return selenium_scrapers.fetch_investing_source(name, url, self.chrome_options)
         
+        if name == "BDI_波罗的海指数":
+            # BDI 需要近 10 天的数据
+            return selenium_scrapers.fetch_investing_source(name, url, self.chrome_options, days_to_keep=10)
+
+        # 2. Investing.com 财经日历数据
+        if name == "USA_Initial_Jobless":
+            # 初请失业金需要近 5 个月的数据 (approx 150 days)
+            return selenium_scrapers.fetch_investing_economic_calendar(name, url, self.chrome_options, days_to_keep=150)
+
+        # 3. 专用抓取逻辑
         if name == "CNN_FearGreed":
             return selenium_scrapers.fetch_cnn_fear_greed(name, url, self.chrome_options)
             
@@ -78,8 +95,11 @@ class MacroDataScraper:
             
         if name == "Fed_Rate_Monitor":
             return selenium_scrapers.fetch_fed_rate_monitor(name, url, self.chrome_options)
+            
+        if name == "CCFI_运价指数":
+            return selenium_scrapers.fetch_ccfi_data(name, url, self.chrome_options)
 
-        # 默认通用抓取
+        # 4. 默认通用抓取 (Eastmoney 等)
         days_to_keep = 30 if "南向资金" in name else 180
         return selenium_scrapers.fetch_generic_source(name, url, self.chrome_options, days_to_keep)
 
