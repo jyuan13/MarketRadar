@@ -271,6 +271,9 @@ def fetch_fed_rate_monitor(name, url, chrome_options):
 def fetch_ccfi_data(name, url, chrome_options):
     """
     抓取中国出口集装箱运价指数 (CCFI)
+    [修复] 
+    1. 增加第一行数据检查逻辑，防止表头解析错误
+    2. 增加页面滚动和显式等待，确保表格加载
     """
     max_retries = 3
     last_error = None
@@ -286,10 +289,13 @@ def fetch_ccfi_data(name, url, chrome_options):
             driver.set_page_load_timeout(45)
             driver.get(url)
             
+            # [新增] 页面交互，确保加载
             try:
+                driver.execute_script("window.scrollTo(0, 300);")
+                time.sleep(2)
                 WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
             except:
-                print(f"⚠️ [{name}] 等待表格超时，尝试解析源码...")
+                print(f"⚠️ [{name}] 等待表格超时，尝试继续解析...")
 
             html = driver.page_source
             dfs = pd.read_html(StringIO(html))
@@ -297,9 +303,11 @@ def fetch_ccfi_data(name, url, chrome_options):
             if not dfs:
                 raise ValueError("未找到表格数据")
             
-            # 查找目标表格 (宽松匹配 "航线" 关键字)
             target_df = None
+            
+            # 策略：遍历所有表格，寻找包含 "航线" 的表头 OR 第一行
             for df in dfs:
+                # 1. 检查 Headers
                 header_str = ""
                 if isinstance(df.columns, pd.MultiIndex):
                     header_str = " ".join([str(c) for col in df.columns for c in col])
@@ -309,14 +317,26 @@ def fetch_ccfi_data(name, url, chrome_options):
                 if "航线" in header_str:
                     target_df = df
                     break
+                
+                # 2. 检查第一行数据 (若 header 解析失败)
+                if not df.empty:
+                    first_row_str = " ".join([str(x) for x in df.iloc[0].values])
+                    if "航线" in first_row_str:
+                        # 将第一行提升为表头
+                        new_header = df.iloc[0]
+                        df = df[1:]
+                        df.columns = new_header
+                        target_df = df
+                        break
             
             if target_df is None:
                 raise ValueError("未找到包含 '航线' 的表格")
 
-            # 提取表头中的日期
+            # 提取日期
             prev_date = None
             curr_date = None
             
+            # 辅助函数：展平列名
             flat_cols = []
             if isinstance(target_df.columns, pd.MultiIndex):
                 for col in target_df.columns:
@@ -338,8 +358,11 @@ def fetch_ccfi_data(name, url, chrome_options):
             records = []
             for _, row in target_df.iterrows():
                 try:
+                    # 假设前四列是核心数据: 航线, 上期, 本期, 涨跌
+                    if len(row) < 4: continue
+                    
                     route_name = str(row.iloc[0]).strip()
-                    if "航线" in route_name or route_name == "nan": continue
+                    if "航线" in route_name or route_name == "nan" or route_name == "": continue
                     
                     def clean_val(x):
                         return float(str(x).replace(',', '').replace('nan', '0'))
@@ -471,6 +494,7 @@ def fetch_investing_economic_calendar(name, url, chrome_options, days_to_keep=15
 def fetch_investing_source(name, url, chrome_options, days_to_keep=180):
     """
     通用 Investing.com 历史数据抓取
+    [新增] 页面滚动逻辑，确保懒加载表格被渲染（解决 ICE/BDI 数据缺失问题）
     """
     max_retries = 5
     last_error = None
@@ -488,7 +512,10 @@ def fetch_investing_source(name, url, chrome_options, days_to_keep=180):
             driver.set_script_timeout(60)
             driver.get(url)
             
+            # [关键] 滚动页面以触发懒加载 (特别是对于 ICE/BDI/SKEW)
             try:
+                driver.execute_script("window.scrollBy(0, 500);")
+                time.sleep(2)
                 WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
             except:
                 pass
@@ -584,7 +611,7 @@ def fetch_investing_source(name, url, chrome_options, days_to_keep=180):
 
 def fetch_gurufocus_insider_ratio(name, url, chrome_options):
     """
-    [新增] 抓取 GuruFocus Insider Buy/Sell Ratio - Historical Data Table
+    抓取 GuruFocus Insider Buy/Sell Ratio - Historical Data Table
     """
     max_retries = 5
     last_error = None
@@ -600,7 +627,6 @@ def fetch_gurufocus_insider_ratio(name, url, chrome_options):
             driver.set_page_load_timeout(60)
             driver.get(url)
             
-            # 等待表格出现
             try:
                 WebDriverWait(driver, 20).until(
                     EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "Historical Data")
@@ -614,7 +640,6 @@ def fetch_gurufocus_insider_ratio(name, url, chrome_options):
             if not dfs:
                 raise ValueError("页面解析为空，未找到表格数据")
 
-            # 寻找包含 "Date", "Value", "YOY" 的表格
             target_df = None
             for df in dfs:
                 cols = [str(c).strip() for c in df.columns]
@@ -625,17 +650,14 @@ def fetch_gurufocus_insider_ratio(name, url, chrome_options):
             if target_df is None:
                 raise ValueError("未找到 'Historical Data' 表格 (需包含 Date/Value/YOY)")
 
-            # 清洗数据
             records = []
             for _, row in target_df.iterrows():
                 try:
                     date_str = str(row['Date']).strip()
                     val_str = str(row['Value']).strip()
-                    # 查找包含 YOY 的列名
                     yoy_col = next(c for c in target_df.columns if "YOY" in str(c))
                     yoy_str = str(row[yoy_col]).strip()
                     
-                    # 简单验证日期格式 YYYY-MM-DD
                     if not re.match(r"\d{4}-\d{2}-\d{2}", date_str):
                         continue
 
