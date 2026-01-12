@@ -1,3 +1,4 @@
+# fetch_data.py (完整代码)
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 """
@@ -18,7 +19,8 @@ def get_market_fx_and_bonds():
         "market_fx": {},
         "china": {},
         "usa": {},
-        "japan": {}
+        "japan": {},
+        "market_klines": {} # 确保初始化这个键
     }
     
     status_logs = []
@@ -109,6 +111,18 @@ def get_market_fx_and_bonds():
         status_logs.append({'name': "科创50实时量比", 'status': True, 'error': None})
     else:
         status_logs.append({'name': "科创50实时量比", 'status': False, 'error': spot_err})
+        
+    # [新增] A股主要指数 (上证/深证/创业板/北证50)
+    ashare_data, ashare_err = fetch_data_core.fetch_ashare_indices()
+    if ashare_data:
+        # 存入 market_klines 下的 A股指数 分类
+        # 注意: main.py 中的 MarketAnalyzer.analyze_all_assets 会遍历 market_klines 下的所有列表
+        data_store["market_klines"]["A股指数"] = ashare_data
+        status_logs.append({'name': "A股主要指数", 'status': True, 'error': None})
+        print(f"   [A股指数] OK ({len(ashare_data)} records)")
+    else:
+        status_logs.append({'name': "A股主要指数", 'status': False, 'error': ashare_err})
+        print(f"   [A股指数] Failed: {ashare_err}")
 
     return data_store, status_logs
 

@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 """
@@ -469,3 +468,67 @@ def fetch_star50_realtime_vol_ratio():
     except Exception as e:
         print(f"科创50实时量比获取失败: {e}")
         return None, str(e)
+
+def fetch_ashare_indices():
+    """
+    获取A股主要指数的日线数据 (近20个交易日)
+    包括: 上证指数, 深证成指, 创业板指, 沪深300
+    [修改] 移除北证50，新增沪深300
+    """
+    print("   -> 获取A股主要指数数据 (AKShare)...")
+    
+    # 映射关系: 名称 -> AKShare symbol (东财接口)
+    # 上证指数: sh000001
+    # 深证成指: sz399001
+    # 创业板指: sz399006
+    # 沪深300: sh000300
+    
+    index_list = [
+        {"name": "上证指数", "symbol": "sh000001"},
+        {"name": "深证成指", "symbol": "sz399001"},
+        {"name": "创业板指", "symbol": "sz399006"},
+        {"name": "沪深300", "symbol": "sh000300"}, 
+    ]
+    
+    results = []
+    errors = []
+
+    for idx in index_list:
+        name = idx["name"]
+        symbol = idx["symbol"]
+        try:
+            # 使用东方财富接口
+            df = ak.stock_zh_index_daily_em(symbol=symbol)
+
+            if df.empty:
+                errors.append(f"{name}: Empty data")
+                continue
+
+            # 整理数据
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.sort_values('date')
+            
+            # 取最近20天
+            df = df.iloc[-20:]
+            
+            # 格式化
+            for _, row in df.iterrows():
+                results.append({
+                    "date": row['date'].strftime('%Y-%m-%d'),
+                    "name": name,
+                    "open": row['open'],
+                    "close": row['close'],
+                    "high": row['high'],
+                    "low": row['low'],
+                    "volume": row['volume'],
+                    "amount": row.get('amount', 0), 
+                    "change_pct": 0.0 # 需要计算或接口未提供，暂置0
+                })
+                
+        except Exception as e:
+            errors.append(f"{name}: {str(e)}")
+    
+    if not results and errors:
+        return [], "; ".join(errors)
+        
+    return results, None
