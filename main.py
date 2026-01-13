@@ -389,9 +389,12 @@ def main():
             kcb50_dict["60分钟K线"] = kcb50_60m
             all_status_logs.append({'name': '科创50_60m', 'status': True, 'error': None})
         else:
+            # [修复] 即使失败也初始化为空列表，防止前端缺失Key
+            kcb50_dict["60分钟K线"] = []
             all_status_logs.append({'name': '科创50_60m', 'status': False, 'error': err})
     except Exception as e:
         print(f"⚠️ 科创50_60m 异常: {e}")
+        kcb50_dict["60分钟K线"] = []
         
     # 2. 迁移原 China 下的科创50字段
     china_data = combined_macro.get("china", {})
@@ -403,14 +406,19 @@ def main():
     # 3. 恒生科技 60m
     try:
         hstech_60m, err = fetch_data_core.fetch_hstech_60m()
+        if "hk" not in combined_macro: combined_macro["hk"] = {}
+        
         if hstech_60m:
-            if "hk" not in combined_macro: combined_macro["hk"] = {}
             combined_macro["hk"]["恒生科技指数_60m"] = hstech_60m
             all_status_logs.append({'name': '恒生科技_60m', 'status': True, 'error': None})
         else:
+            # [修复] 即使失败也初始化为空列表
+            combined_macro["hk"]["恒生科技指数_60m"] = []
             all_status_logs.append({'name': '恒生科技_60m', 'status': False, 'error': err})
     except Exception as e:
         print(f"⚠️ 恒生科技_60m 异常: {e}")
+        if "hk" not in combined_macro: combined_macro["hk"] = {}
+        combined_macro["hk"]["恒生科技指数_60m"] = []
 
     # [Step 4.7] 获取六大银行 K线与均线
     print("\n[Step 4.7] 获取六大银行日线数据...")

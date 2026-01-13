@@ -538,7 +538,7 @@ def _calculate_hourly_volume_ratio(df):
     逻辑: 量比 = 当前小时Volume / 过去5日同一时段(Hour)均量
     输入df需包含: date(datetime), volume(float)
     """
-    if df.empty or 'volume' not in df.columns:
+    if df is None or df.empty or 'volume' not in df.columns:
         return df
 
     try:
@@ -576,15 +576,27 @@ def fetch_kcb50_60m():
     """
     获取科创50 ETF (588000) 近5个交易日的 60分钟K线
     包含: Volume, Amount, Volume Ratio
+    [修复] 增加对 None 返回值的检查，并尝试 ETF 专用接口
     """
     print("   -> 获取科创50 (588000) 60分钟K线 (AKShare)...")
     try:
-        # AKShare: stock_zh_a_hist_min_em, period="60"
-        # 该接口通常返回最近的一段时间，足够覆盖5个交易日
-        df = ak.stock_zh_a_hist_min_em(symbol="588000", period="60", adjust="qfq")
+        df = None
+        # 1. 尝试股票分时接口 (通常兼容 ETF)
+        try:
+            df = ak.stock_zh_a_hist_min_em(symbol="588000", period="60", adjust="qfq")
+        except:
+            pass
+            
+        # 2. 如果失败或为空，尝试 ETF 分时接口 (如有)
+        if df is None or df.empty:
+            if hasattr(ak, 'fund_etf_hist_min_em'):
+                try:
+                    df = ak.fund_etf_hist_min_em(symbol="588000", period="60", adjust="qfq")
+                except:
+                    pass
         
-        if df.empty:
-            return [], "Empty dataframe"
+        if df is None or df.empty:
+            return [], "Empty or None dataframe from AKShare"
             
         # 字段映射: "时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额", ...
         # 注意: 这里的 "成交量" 单位可能是 手，"成交额" 是 元
@@ -600,7 +612,6 @@ def fetch_kcb50_60m():
         df = _calculate_hourly_volume_ratio(df)
         
         # 截取最近 5 个交易日的数据 (假设每天4根60mK线，5天约20根，稍微多取一点做展示)
-        # 这里简单取最近 30 条记录 (约7天) 
         df_slice = df.iloc[-30:].copy()
         
         # 格式化
@@ -625,22 +636,19 @@ def fetch_kcb50_60m():
 def fetch_hstech_60m():
     """
     获取恒生科技指数 (^HSTECH) 近5个交易日的 60分钟K线
-    使用 yfinance
+    [修复] 指数分时数据 YFinance 经常为空，改用 ETF 3033.HK (南方恒生科技) 作为代理
     """
-    print("   -> 获取恒生科技指数 (^HSTECH) 60分钟K线 (YFinance)...")
+    print("   -> 获取恒生科技指数 60分钟K线 (Using ETF 3033.HK as proxy)...")
     try:
-        # yfinance 获取 60m 数据 (valid intervals: 1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo)
-        # period="1mo" 确保足够计算量比
-        t = yf.Ticker("^HSTECH")
+        # 使用恒生科技 ETF (3033.HK) 代替指数获取 60m 数据
+        t = yf.Ticker("3033.HK")
         hist = t.history(interval="60m", period="1mo")
         
-        if hist.empty:
-            return [], "Empty dataframe from yfinance"
+        if hist is None or hist.empty:
+            return [], "Empty dataframe from yfinance (3033.HK)"
             
         hist = hist.reset_index()
         # yfinance columns: Datetime, Open, High, Low, Close, Volume, (Dividends, Stock Splits)
-        # Rename
-        # Handle time zone? yfinance returns UTC or Local. Usually aware.
         if isinstance(hist['Datetime'].dtype, pd.DatetimeTZDtype):
              hist['date'] = hist['Datetime'].dt.tz_convert(TZ_CN).dt.tz_localize(None)
         else:
@@ -648,9 +656,7 @@ def fetch_hstech_60m():
 
         hist.rename(columns={"Volume": "volume", "Close": "close"}, inplace=True)
         
-        # yfinance 通常不提供指数的 Amount (成交额)，只有 Volume
-        # 这里 Amount 置为 0 或 估算 (Close * Volume, 但不准确)
-        # 用户要求"核心字段：小时成交额"，如果没有只能留空
+        # yfinance 无 Amount
         hist['amount'] = 0.0 
         
         hist = hist.sort_values('date')
@@ -658,8 +664,7 @@ def fetch_hstech_60m():
         # 计算量比
         hist = _calculate_hourly_volume_ratio(hist)
         
-        # 截取最近 5 个交易日 (港股每天 5.5小时交易? 60m可能有 5-6根)
-        # 取最近 35 条
+        # 截取最近 5 个交易日 (港股每天 5.5小时, 取最近 35 条)
         df_slice = hist.iloc[-35:].copy()
         
         df_slice['date'] = df_slice['date'].dt.strftime('%Y-%m-%d %H:%M')
@@ -671,7 +676,8 @@ def fetch_hstech_60m():
                 "volume": row['volume'],
                 "amount": row['amount'], # YFinance 无 Amount
                 "volume_ratio": row.get('volume_ratio', 0.0),
-                "close": row['close']
+                "close": row['close'],
+                "note": "Source: ETF 3033.HK"
             })
             
         return result, None
