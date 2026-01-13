@@ -142,12 +142,19 @@ def fetch_cboe_data(name, url, chrome_options):
             driver.set_page_load_timeout(45)
             driver.get(url)
             
+            # [Debug] 打印页面标题，判断是否被拦截
             try:
+                print(f"   [Debug] Page Title: {driver.title}")
+            except:
+                pass
+
+            try:
+                # 显式等待核心数据出现
                 WebDriverWait(driver, 20).until(
                     EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "TOTAL PUT/CALL RATIO")
                 )
             except:
-                pass
+                print(f"⚠️ [{name}] 等待关键字 'TOTAL PUT/CALL RATIO' 超时...")
 
             body_text = driver.find_element(By.TAG_NAME, "body").text
             normalized_text = re.sub(r'\s+', ' ', body_text).strip()
@@ -168,11 +175,17 @@ def fetch_cboe_data(name, url, chrome_options):
             
             found_count = 0
             for key in target_keys:
-                pattern = re.escape(key) + r"\s+([\d\.]+)"
+                # [修改] 正则放宽: 允许冒号，允许key和数值间有各种符号
+                pattern = re.escape(key) + r"[:\s]+([\d\.]+)"
                 match = re.search(pattern, normalized_text)
                 if match:
-                    data_dict[key] = float(match.group(1))
-                    found_count += 1
+                    val_str = match.group(1)
+                    # 排除纯点号等异常情况
+                    if val_str == '.': 
+                        data_dict[key] = None
+                    else:
+                        data_dict[key] = float(val_str)
+                        found_count += 1
                 else:
                     data_dict[key] = None
             
@@ -181,13 +194,15 @@ def fetch_cboe_data(name, url, chrome_options):
                 print(f"✅ [{name}] 抓取成功! 获得 {found_count} 个指标, 日期: {current_date}")
                 return name, records, None
             else:
+                # [Debug] 如果失败，打印页面前200个字符，帮助分析是否是反爬拦截页面
+                print(f"⚠️ 未匹配到数据。页面预览: {normalized_text[:200]}...")
                 raise ValueError("未匹配到任何 Put/Call Ratio 数据")
 
         except Exception as e:
             last_error = str(e)
             print(f"❌ [{name}] 失败: {str(e)[:100]}")
             if attempt < max_retries:
-                time.sleep(2)
+                time.sleep(5) # 失败后增加等待时间，应对限流
         finally:
             if driver:
                 try:
@@ -271,9 +286,6 @@ def fetch_fed_rate_monitor(name, url, chrome_options):
 def fetch_ccfi_data(name, url, chrome_options):
     """
     抓取中国出口集装箱运价指数 (CCFI)
-    [修复] 
-    1. 增加第一行数据检查逻辑，防止表头解析错误
-    2. 增加页面滚动和显式等待，确保表格加载
     """
     max_retries = 3
     last_error = None
@@ -289,7 +301,7 @@ def fetch_ccfi_data(name, url, chrome_options):
             driver.set_page_load_timeout(45)
             driver.get(url)
             
-            # [新增] 页面交互，确保加载
+            # 页面交互，确保加载
             try:
                 driver.execute_script("window.scrollTo(0, 300);")
                 time.sleep(2)
@@ -305,7 +317,6 @@ def fetch_ccfi_data(name, url, chrome_options):
             
             target_df = None
             
-            # 策略：遍历所有表格，寻找包含 "航线" 的表头 OR 第一行
             for df in dfs:
                 # 1. 检查 Headers
                 header_str = ""
@@ -322,7 +333,6 @@ def fetch_ccfi_data(name, url, chrome_options):
                 if not df.empty:
                     first_row_str = " ".join([str(x) for x in df.iloc[0].values])
                     if "航线" in first_row_str:
-                        # 将第一行提升为表头
                         new_header = df.iloc[0]
                         df = df[1:]
                         df.columns = new_header
@@ -336,7 +346,6 @@ def fetch_ccfi_data(name, url, chrome_options):
             prev_date = None
             curr_date = None
             
-            # 辅助函数：展平列名
             flat_cols = []
             if isinstance(target_df.columns, pd.MultiIndex):
                 for col in target_df.columns:
@@ -358,9 +367,7 @@ def fetch_ccfi_data(name, url, chrome_options):
             records = []
             for _, row in target_df.iterrows():
                 try:
-                    # 假设前四列是核心数据: 航线, 上期, 本期, 涨跌
                     if len(row) < 4: continue
-                    
                     route_name = str(row.iloc[0]).strip()
                     if "航线" in route_name or route_name == "nan" or route_name == "": continue
                     
@@ -494,7 +501,6 @@ def fetch_investing_economic_calendar(name, url, chrome_options, days_to_keep=15
 def fetch_investing_source(name, url, chrome_options, days_to_keep=180):
     """
     通用 Investing.com 历史数据抓取
-    [新增] 页面滚动逻辑，确保懒加载表格被渲染（解决 ICE/BDI 数据缺失问题）
     """
     max_retries = 5
     last_error = None
