@@ -386,15 +386,15 @@ def main():
     try:
         kcb50_60m, err = fetch_data_core.fetch_kcb50_60m()
         if kcb50_60m:
-            kcb50_dict["60分钟K线"] = kcb50_60m
+            kcb50_dict["科创50_60分钟K线"] = kcb50_60m
             all_status_logs.append({'name': '科创50_60m', 'status': True, 'error': None})
         else:
             # [修复] 即使失败也初始化为空列表，防止前端缺失Key
-            kcb50_dict["60分钟K线"] = []
+            kcb50_dict["科创50_60分钟K线"] = []
             all_status_logs.append({'name': '科创50_60m', 'status': False, 'error': err})
     except Exception as e:
         print(f"⚠️ 科创50_60m 异常: {e}")
-        kcb50_dict["60分钟K线"] = []
+        kcb50_dict["科创50_60分钟K线"] = []
         
     # 2. 迁移原 China 下的科创50字段
     china_data = combined_macro.get("china", {})

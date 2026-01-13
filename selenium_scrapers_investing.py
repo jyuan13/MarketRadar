@@ -95,8 +95,19 @@ def fetch_investing_source(name, url, chrome_options, days_to_keep=180):
             df = df.dropna(subset=['_std_date'])
             df['_std_date'] = pd.to_datetime(df['_std_date'])
             
+            # [修改] 数据回退机制：如果按日期过滤后为空，但原始数据不为空（说明数据过旧），则强制返回最新 N 条
+            df = df.sort_values(by='_std_date', ascending=False)
+            
             cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=days_to_keep)
-            df = df[df['_std_date'] >= cutoff_date]
+            filtered_df = df[df['_std_date'] >= cutoff_date]
+            
+            if filtered_df.empty and not df.empty:
+                latest_date_str = df.iloc[0]['_std_date'].strftime('%Y-%m-%d')
+                print(f"⚠️ [{name}] 数据过旧 (Latest: {latest_date_str})，超出 {days_to_keep} 天范围。自动回退: 返回最新 5 条。")
+                df = df.head(5)
+            else:
+                df = filtered_df
+            
             df['_std_date'] = df['_std_date'].dt.strftime('%Y-%m-%d')
             
             if 'volume' in df.columns:
