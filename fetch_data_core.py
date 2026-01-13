@@ -527,3 +527,234 @@ def fetch_ashare_indices():
         return [], "; ".join(errors)
         
     return results, None
+
+# ==============================================================================
+# 新增: 60分钟K线 (科创50 & 恒生科技) & 银行数据
+# ==============================================================================
+
+def _calculate_hourly_volume_ratio(df):
+    """
+    通用辅助函数: 计算小时级别的量比
+    逻辑: 量比 = 当前小时Volume / 过去5日同一时段(Hour)均量
+    输入df需包含: date(datetime), volume(float)
+    """
+    if df.empty or 'volume' not in df.columns:
+        return df
+
+    try:
+        # 1. 提取小时特征
+        df['hour_str'] = df['date'].dt.strftime('%H:%M')
+        
+        # 2. 计算过去5日同一时段均量
+        # 使用 transform 计算滚动均值 (rolling shift 1 避免包含当前K线)
+        # 注意: 这里简单使用 groupby + rolling mean，假设数据是连续的
+        # 为了更严谨，我们计算每个 hour_str 的历史均值
+        
+        # 先按时间分组，然后对每组计算 lag 1 的 5周期均值
+        df['avg_vol_5d'] = df.groupby('hour_str')['volume'].transform(
+            lambda x: x.shift(1).rolling(window=5, min_periods=1).mean()
+        )
+        
+        # 3. 计算量比
+        # 如果分母为0或NaN，量比置为 0 (或者 1.0)
+        df['volume_ratio'] = df['volume'] / df['avg_vol_5d']
+        df['volume_ratio'] = df['volume_ratio'].fillna(0.0).replace([float('inf'), -float('inf')], 0.0)
+        
+        # 格式化保留2位小数
+        df['volume_ratio'] = df['volume_ratio'].apply(lambda x: round(x, 2))
+        
+        # 清理中间列
+        df.drop(columns=['hour_str', 'avg_vol_5d'], inplace=True)
+        
+    except Exception as e:
+        print(f"   ⚠️ 量比计算失败: {e}")
+        df['volume_ratio'] = 0.0
+        
+    return df
+
+def fetch_kcb50_60m():
+    """
+    获取科创50 ETF (588000) 近5个交易日的 60分钟K线
+    包含: Volume, Amount, Volume Ratio
+    """
+    print("   -> 获取科创50 (588000) 60分钟K线 (AKShare)...")
+    try:
+        # AKShare: stock_zh_a_hist_min_em, period="60"
+        # 该接口通常返回最近的一段时间，足够覆盖5个交易日
+        df = ak.stock_zh_a_hist_min_em(symbol="588000", period="60", adjust="qfq")
+        
+        if df.empty:
+            return [], "Empty dataframe"
+            
+        # 字段映射: "时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额", ...
+        # 注意: 这里的 "成交量" 单位可能是 手，"成交额" 是 元
+        df.rename(columns={
+            "时间": "date", "成交量": "volume", "成交额": "amount", 
+            "开盘": "open", "收盘": "close", "最高": "high", "最低": "low"
+        }, inplace=True)
+        
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        
+        # 计算量比
+        df = _calculate_hourly_volume_ratio(df)
+        
+        # 截取最近 5 个交易日的数据 (假设每天4根60mK线，5天约20根，稍微多取一点做展示)
+        # 这里简单取最近 30 条记录 (约7天) 
+        df_slice = df.iloc[-30:].copy()
+        
+        # 格式化
+        df_slice['date'] = df_slice['date'].dt.strftime('%Y-%m-%d %H:%M')
+        
+        result = []
+        for _, row in df_slice.iterrows():
+            result.append({
+                "date": row['date'],
+                "volume": row['volume'],
+                "amount": row['amount'],
+                "volume_ratio": row.get('volume_ratio', 0.0),
+                "close": row['close'] # 附带收盘价方便查看
+            })
+            
+        return result, None
+
+    except Exception as e:
+        print(f"科创50 60mK线获取失败: {e}")
+        return [], str(e)
+
+def fetch_hstech_60m():
+    """
+    获取恒生科技指数 (^HSTECH) 近5个交易日的 60分钟K线
+    使用 yfinance
+    """
+    print("   -> 获取恒生科技指数 (^HSTECH) 60分钟K线 (YFinance)...")
+    try:
+        # yfinance 获取 60m 数据 (valid intervals: 1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo)
+        # period="1mo" 确保足够计算量比
+        t = yf.Ticker("^HSTECH")
+        hist = t.history(interval="60m", period="1mo")
+        
+        if hist.empty:
+            return [], "Empty dataframe from yfinance"
+            
+        hist = hist.reset_index()
+        # yfinance columns: Datetime, Open, High, Low, Close, Volume, (Dividends, Stock Splits)
+        # Rename
+        # Handle time zone? yfinance returns UTC or Local. Usually aware.
+        if isinstance(hist['Datetime'].dtype, pd.DatetimeTZDtype):
+             hist['date'] = hist['Datetime'].dt.tz_convert(TZ_CN).dt.tz_localize(None)
+        else:
+             hist['date'] = pd.to_datetime(hist['Datetime'])
+
+        hist.rename(columns={"Volume": "volume", "Close": "close"}, inplace=True)
+        
+        # yfinance 通常不提供指数的 Amount (成交额)，只有 Volume
+        # 这里 Amount 置为 0 或 估算 (Close * Volume, 但不准确)
+        # 用户要求"核心字段：小时成交额"，如果没有只能留空
+        hist['amount'] = 0.0 
+        
+        hist = hist.sort_values('date')
+        
+        # 计算量比
+        hist = _calculate_hourly_volume_ratio(hist)
+        
+        # 截取最近 5 个交易日 (港股每天 5.5小时交易? 60m可能有 5-6根)
+        # 取最近 35 条
+        df_slice = hist.iloc[-35:].copy()
+        
+        df_slice['date'] = df_slice['date'].dt.strftime('%Y-%m-%d %H:%M')
+        
+        result = []
+        for _, row in df_slice.iterrows():
+            result.append({
+                "date": row['date'],
+                "volume": row['volume'],
+                "amount": row['amount'], # YFinance 无 Amount
+                "volume_ratio": row.get('volume_ratio', 0.0),
+                "close": row['close']
+            })
+            
+        return result, None
+
+    except Exception as e:
+        print(f"恒生科技 60mK线获取失败: {e}")
+        return [], str(e)
+
+def fetch_us_banks_daily():
+    """
+    获取六大银行的日线数据 (优先 Akshare stock_us_daily, 备选 yfinance)
+    JPM, BAC, C, WFC, GS, MS
+    """
+    print("   -> 获取六大银行日线数据...")
+    banks = [
+        {"name": "摩根大通", "symbol": "JPM"},
+        {"name": "美国银行", "symbol": "BAC"},
+        {"name": "花旗集团", "symbol": "C"},
+        {"name": "富国银行", "symbol": "WFC"},
+        {"name": "高盛集团", "symbol": "GS"},
+        {"name": "摩根士丹利", "symbol": "MS"},
+    ]
+    
+    results = []
+    end_date_str = datetime.datetime.now().strftime("%Y%m%d")
+    start_date_str = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y%m%d")
+    
+    for b in banks:
+        name = b["name"]
+        symbol = b["symbol"]
+        df = pd.DataFrame()
+        
+        # 1. Try AKShare
+        try:
+            # stock_us_daily 需要 adjust="qfq"
+            # 注意: AKShare 美股接口有时不稳定
+            df = ak.stock_us_daily(symbol=symbol, adjust="qfq")
+        except:
+            pass
+            
+        # 2. Try YFinance if AKShare failed or empty
+        if df.empty:
+            try:
+                yf_df = yf.download(symbol, period="1y", progress=False, auto_adjust=False)
+                if not yf_df.empty:
+                    yf_df = yf_df.reset_index()
+                    # Standardize columns
+                    yf_df.rename(columns={"Date": "date", "Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
+                    # Handle MultiIndex columns if present
+                    if isinstance(yf_df.columns, pd.MultiIndex):
+                        yf_df.columns = yf_df.columns.droplevel(1)
+                        # Re-rename after drop level if needed, but usually simple download is fine or flattened
+                        # Let's map safely
+                        pass 
+                    
+                    # Ensure lower case columns
+                    yf_df.columns = [c.lower() for c in yf_df.columns]
+                    df = yf_df
+            except:
+                pass
+        
+        if not df.empty:
+            # 统一格式
+            df.columns = [c.lower() for c in df.columns]
+            if 'date' not in df.columns and '日期' in df.columns:
+                df.rename(columns={'日期': 'date'}, inplace=True)
+            
+            # AKShare col map
+            rename_map = {'开盘': 'open', '收盘': 'close', '最高': 'high', '最低': 'low', '成交量': 'volume'}
+            df.rename(columns=rename_map, inplace=True)
+            
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+                df = df.sort_values('date')
+                df['name'] = name
+                
+                # 必须包含 close, open, high, low
+                if 'close' in df.columns:
+                    results.append(df)
+                    print(f"      OK: {name}")
+                else:
+                    print(f"      Skip: {name} (Missing columns)")
+        else:
+            print(f"      Fail: {name}")
+            
+    return results

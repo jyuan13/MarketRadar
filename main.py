@@ -18,6 +18,8 @@ import fetch_data
 import MarketRadar
 import utils
 import scrape_economy_selenium
+# 引入 fetch_data_core 以直接调用新功能
+import fetch_data_core
 
 OUTPUT_FILENAME = "MarketRadar_Report.json"
 LOG_FILENAME = "market_data_status.txt"
@@ -73,10 +75,11 @@ def deep_merge(dict1, dict2):
             result[key] = value
     return result
 
-def merge_final_report(macro_data_combined, kline_data_dict, ma_data_dict):
+def merge_final_report(macro_data_combined, kline_data_dict, ma_data_dict, kcb50_data=None):
     """
     整合所有模块的数据
     ma_data_dict: {"general": [...], "commodities": [...]}
+    kcb50_data: 新增的科创50独立板块
     """
     merged = {
         "meta": kline_data_dict.get("meta", {}),
@@ -85,6 +88,7 @@ def merge_final_report(macro_data_combined, kline_data_dict, ma_data_dict):
             "大宗商品": ma_data_dict.get("commodities", [])
         },
         "market_fx": macro_data_combined.get("market_fx", {}),
+        "科创50": kcb50_data if kcb50_data else {},  # 新增顶层项
         "china": macro_data_combined.get("china", {}),
         "usa": macro_data_combined.get("usa", {}),
         "japan": macro_data_combined.get("japan", {}),
@@ -374,8 +378,68 @@ def main():
         except Exception as e:
             print(f"⚠️ A股指数处理失败: {e}")
 
+    # [Step 4.6] 获取 60分钟K线 (科创50 & 恒生科技)
+    print("\n[Step 4.6] 获取 60分钟K线 (科创50 & 恒生科技)...")
+    kcb50_dict = {}
+    
+    # 1. 科创50 60m
+    try:
+        kcb50_60m, err = fetch_data_core.fetch_kcb50_60m()
+        if kcb50_60m:
+            kcb50_dict["60分钟K线"] = kcb50_60m
+            all_status_logs.append({'name': '科创50_60m', 'status': True, 'error': None})
+        else:
+            all_status_logs.append({'name': '科创50_60m', 'status': False, 'error': err})
+    except Exception as e:
+        print(f"⚠️ 科创50_60m 异常: {e}")
+        
+    # 2. 迁移原 China 下的科创50字段
+    china_data = combined_macro.get("china", {})
+    keys_to_move = ["科创50实时快照", "科创50融资融券", "科创50估值"]
+    for k in keys_to_move:
+        if k in china_data:
+            kcb50_dict[k] = china_data.pop(k) # Move data
+            
+    # 3. 恒生科技 60m
+    try:
+        hstech_60m, err = fetch_data_core.fetch_hstech_60m()
+        if hstech_60m:
+            if "hk" not in combined_macro: combined_macro["hk"] = {}
+            combined_macro["hk"]["恒生科技指数_60m"] = hstech_60m
+            all_status_logs.append({'name': '恒生科技_60m', 'status': True, 'error': None})
+        else:
+            all_status_logs.append({'name': '恒生科技_60m', 'status': False, 'error': err})
+    except Exception as e:
+        print(f"⚠️ 恒生科技_60m 异常: {e}")
+
+    # [Step 4.7] 获取六大银行 K线与均线
+    print("\n[Step 4.7] 获取六大银行日线数据...")
+    try:
+        bank_dfs = fetch_data_core.fetch_us_banks_daily()
+        for df in bank_dfs:
+            name = df['name'].iloc[0]
+            # 计算均线
+            ma_res = utils.calculate_ma(df)
+            if ma_res:
+                ma_data_dict["general"].extend(ma_res)
+            
+            # 存储 K线 (切片)
+            cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=REPORT_DAYS)
+            df_slice = df[df['date'] >= cutoff_date].copy()
+            df_slice['date'] = df_slice['date'].dt.strftime('%Y-%m-%d')
+            
+            if "data" not in kline_data_dict: kline_data_dict["data"] = {}
+            kline_data_dict["data"][name] = df_slice.to_dict(orient='records')
+            
+            all_status_logs.append({'name': f"Bank_{name}", 'status': True, 'error': None})
+            
+    except Exception as e:
+        print(f"⚠️ 六大银行数据获取异常: {e}")
+        all_status_logs.append({'name': 'US_Banks', 'status': False, 'error': str(e)})
+
     print("\n[Step 5] 整合数据并清洗...")
-    final_data = merge_final_report(combined_macro, kline_data_dict, ma_data_dict)
+    # 传入 kcb50_dict
+    final_data = merge_final_report(combined_macro, kline_data_dict, ma_data_dict, kcb50_data=kcb50_dict)
     final_data = clean_and_round(final_data)
 
     success_names = set(log['name'] for log in all_status_logs if log.get('status'))
@@ -396,7 +460,7 @@ def main():
     if save_compact_json(final_data, OUTPUT_FILENAME):
         try:
             email_subject = f"MarketRadar全量日报_{datetime.now(TZ_CN).strftime('%Y-%m-%d')}"
-            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观(Selenium), 汇率/国债(Online), K线(Stock/VNI/科创50/A股), 信号扫描(MyTT)\n\n"
+            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观, 汇率, K线(Stock/VNI/科创50/A股/银行), 信号扫描(MyTT)\n\n"
             
             email_body = generate_email_body_summary(cleaned_logs, signal_summary)
             email_body = base_body + email_body
