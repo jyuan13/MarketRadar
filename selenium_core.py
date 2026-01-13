@@ -5,7 +5,8 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from selenium.webdriver.chrome.options import Options
-import selenium_scrapers
+import selenium_scrapers_investing
+import selenium_scrapers_misc
 
 class MacroDataScraper:
     def __init__(self):
@@ -83,40 +84,38 @@ class MacroDataScraper:
         """
         # 1. Investing.com 常规历史数据
         if name == "恒生医疗保健指数":
-            return selenium_scrapers.fetch_investing_source(name, url, self.chrome_options)
+            return selenium_scrapers_investing.fetch_investing_source(name, url, self.chrome_options)
         
         # Investing.com 近 10 天数据组
         if name in ["BDI_波罗的海指数", "CBOE_SKEW", "ICE_BofA_HighYield"]:
-            return selenium_scrapers.fetch_investing_source(name, url, self.chrome_options, days_to_keep=10)
+            return selenium_scrapers_investing.fetch_investing_source(name, url, self.chrome_options, days_to_keep=10)
 
         # 2. Investing.com 财经日历数据
         if name == "USA_Initial_Jobless":
-            # 初请失业金需要近 5 个月的数据 (approx 150 days)
-            return selenium_scrapers.fetch_investing_economic_calendar(name, url, self.chrome_options, days_to_keep=150)
+            return selenium_scrapers_investing.fetch_investing_economic_calendar(name, url, self.chrome_options, days_to_keep=150)
         
         if name == "USA_ISM_New_Orders":
-            # ISM制造业新订单指数 (月度数据, 获取近150 days)
-            return selenium_scrapers.fetch_investing_economic_calendar(name, url, self.chrome_options, days_to_keep=150)
+            return selenium_scrapers_investing.fetch_investing_economic_calendar(name, url, self.chrome_options, days_to_keep=365)
+        
+        if name == "Fed_Rate_Monitor":
+            return selenium_scrapers_investing.fetch_fed_rate_monitor(name, url, self.chrome_options)
 
-        # 3. 专用抓取逻辑
+        # 3. 专用抓取逻辑 (其他来源)
         if name == "CNN_FearGreed":
-            return selenium_scrapers.fetch_cnn_fear_greed(name, url, self.chrome_options)
+            return selenium_scrapers_misc.fetch_cnn_fear_greed(name, url, self.chrome_options)
             
         if name == "CBOE_PutCallRatio":
-            return selenium_scrapers.fetch_cboe_data(name, url, self.chrome_options)
-            
-        if name == "Fed_Rate_Monitor":
-            return selenium_scrapers.fetch_fed_rate_monitor(name, url, self.chrome_options)
+            return selenium_scrapers_misc.fetch_cboe_data(name, url, self.chrome_options)
             
         if name == "CCFI_运价指数":
-            return selenium_scrapers.fetch_ccfi_data(name, url, self.chrome_options)
+            return selenium_scrapers_misc.fetch_ccfi_data(name, url, self.chrome_options)
             
         if name == "Insider_BuySell_Ratio_USA":
-            return selenium_scrapers.fetch_gurufocus_insider_ratio(name, url, self.chrome_options)
+            return selenium_scrapers_misc.fetch_gurufocus_insider_ratio(name, url, self.chrome_options)
 
         # 4. 默认通用抓取 (Eastmoney 等)
         days_to_keep = 30 if "南向资金" in name else 180
-        return selenium_scrapers.fetch_generic_source(name, url, self.chrome_options, days_to_keep)
+        return selenium_scrapers_misc.fetch_generic_source(name, url, self.chrome_options, days_to_keep)
 
     def run_concurrent(self):
         print("🚀 [Scraper] 正在并发抓取宏观数据 (Workers=2)...")
