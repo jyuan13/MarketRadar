@@ -3,6 +3,7 @@ from config.settings import ConfigManager
 from src.utils.bus import MessageBus
 from src.collectors.manager import MarketCollector
 from src.formatters.json_fmt import JsonFormatter
+from src.utils.notifier import Notifier
 import datetime
 import time
 
@@ -69,7 +70,18 @@ def main():
     formatter.save_to_file(final_report, "MarketRadar_Refactored_Report.json")
     
     # Summary
-    print("\n" + bus.get_summary())
+    summary_text = bus.get_summary()
+    print("\n" + summary_text)
+    
+    # 6. Notification
+    print("   [4/4] Sending Notification...")
+    notifier = Notifier(cfg, bus)
+    notifier.send_email(
+        subject=f"MarketRadar Report {datetime.datetime.now().strftime('%Y-%m-%d')}",
+        body=summary_text,
+        attachment_files=["MarketRadar_Refactored_Report.json"]
+    )
+    
     print(f"✨ Done in {time.time() - start_time:.2f}s")
 
 if __name__ == "__main__":

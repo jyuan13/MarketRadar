@@ -65,9 +65,12 @@ pip install -r requirements.txt
 ### 2. 配置说明
 
 *   **API Keys**:
-    *   `Fred_API_KEY`: 若需获取美联储 FRED 数据，请在环境变量中设置。
+    *   `FRED_API_KEY`: 若需获取美联储 FRED 数据，请在环境变量中设置。
 *   **邮箱通知**:
-    *   在 `config/settings.py` 或环境变量中配置 `SENDER_EMAIL` 等信息以启用邮件推送。
+    *   在环境变量中配置以下字段以启用邮件推送 (默认使用QQ邮箱SMTP/465端口)：
+        *   `SENDER_EMAIL`: 发件人邮箱
+        *   `SENDER_PASSWORD`: 邮箱授权码
+        *   `RECEIVER_EMAIL`: 收件人邮箱
 *   **采集目标**:
     *   所有监控的股票、指数、宏观指标均在 `config/settings.py` 中定义。如需增加新的监控标的，直接修改该文件即可，无需改动核心代码。
 

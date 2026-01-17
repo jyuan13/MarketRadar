@@ -13,6 +13,17 @@ class ConfigManager:
         self.REPORT_DAYS = 20
         self.CALC_DAYS = 365 # Loop back for MA calc
         
+        
+        # Email Configuration
+        self.EMAIL = {
+            "enable": True,
+            "sender_email": os.environ.get("SENDER_EMAIL"),
+            "sender_password": os.environ.get("SENDER_PASSWORD"),
+            "receiver_email": os.environ.get("RECEIVER_EMAIL"),
+            "smtp_server": "smtp.qq.com",
+            "smtp_port": 465
+        }
+
         # --- Targets Configuration ---
         
         # 1. K-Lines Targets (Indices, Stocks, Commodities)

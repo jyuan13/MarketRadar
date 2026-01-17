@@ -920,9 +920,9 @@ def fetch_global_macro_extra():
     # Akshare: `macro_usa_tga`, `macro_usa_tips`.
     
     # 策略: 直接使用 FRED API (requests) 以保证稳定性，因为 User 提供了 Key
-    fred_key = os.environ.get("Fred_API_KEY")
+    fred_key = os.environ.get("FRED_API_KEY")
     if not fred_key:
-        print("   ⚠️ 未检测到 Fred_API_KEY 环境变量，跳过 FRED 数据获取。")
+        print("   ⚠️ 未检测到 FRED_API_KEY 环境变量，跳过 FRED 数据获取。")
         return {}
 
     # FRED API Config
