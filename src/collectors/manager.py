@@ -12,7 +12,7 @@ class MarketCollector:
         
         self.obb = OpenBBSource(message_bus)
         self.ak = AkShareSource(message_bus)
-        self.fred = FredSource(message_bus)
+        self.fred = FredSource(message_bus, api_key=self.cfg.FRED_CONFIG.get("api_key"))
         # Selenium Source initialization might be heavy, do on demand or once?
         # self.selenium = SeleniumSource(message_bus) 
 

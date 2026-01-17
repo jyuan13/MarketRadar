@@ -119,8 +119,13 @@ class AkShareSource(BaseSource):
         pass
 
 class FredSource(BaseSource):
+    def __init__(self, message_bus=None, api_key=None):
+        super().__init__(message_bus)
+        self.api_key = api_key
+
     def fetch_series(self, series_id, days=60):
-        key = os.environ.get("FRED_API_KEY")
+        # Priority: explicit key -> env var (fallback)
+        key = self.api_key or os.environ.get("FRED_API_KEY")
         if not key: return [], "No API Key"
         
         base_url = "https://api.stlouisfed.org/fred/series/observations"

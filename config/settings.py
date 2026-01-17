@@ -2,6 +2,10 @@
 import os
 import datetime
 from zoneinfo import ZoneInfo
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(): pass
 
 class ConfigManager:
     def __init__(self):
@@ -23,6 +27,13 @@ class ConfigManager:
             "smtp_server": "smtp.qq.com",
             "smtp_port": 465
         }
+        
+        # FRED Configuration
+        self.FRED_CONFIG = {
+            "api_key": os.environ.get("FRED_API_KEY")
+        }
+
+        # --- Targets Configuration ---
 
         # --- Targets Configuration ---
         
@@ -179,5 +190,5 @@ class ConfigManager:
         }
         
     def setup_env(self):
-        # Placeholder for dotenv setup if needed, currently assumes os.environ loaded
-        pass
+        # Load environment variables from .env file if available
+        load_dotenv()
