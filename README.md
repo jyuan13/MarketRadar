@@ -1,60 +1,101 @@
-# MarketRadar - 全球宏观与市场数据雷达
+# MarketRadar - 全球宏观与金融市场数据雷达
 
-这是一个基于 Python 的自动化市场数据获取与分析工具。它结合了 **AkShare** (针对中国市场) 和 **OpenBB SDK** (针对全球市场) 的强大功能，为您提供每日最新的关键金融数据报告。
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
+[![OpenBB](https://img.shields.io/badge/OpenBB-SDK%20v4-orange)](https://openbb.co/)
+[![AkShare](https://img.shields.io/badge/AkShare-Latest-red)](https://akshare.xyz/)
 
-## 核心功能
+**MarketRadar** 是一个模块化的金融数据采集与分析系统，旨在帮助投资者快速获取全球宏观经济、股市、债市、大宗商品及加密货币的核心数据，并生成整合后的每日简报。
 
-1.  **全球宏观数据 (OpenBB/FRED)**
-    *   美元指数、VIX 恐慌指数
-    *   美国/日本国债收益率 (10年/2年等)
-    *   关键宏观指标: TIPS 实际利率, ON RRP, TGA 余额, 高收益债利差, 金融条件指数等 (New)
+本项目已采用**分层架构 (Layered Architecture)** 重构，支持更灵活的扩展与维护。
 
-2.  **中国市场数据 (AkShare)**
-    *   **A股指数**: 上证、深证、创业板、沪深300 (日线/均线)
-    *   **科创50**: 实时量比、融资融券、指数估值、60分钟K线
-    *   **南向资金**: 每日净流入趋势
-    *   **货币与经济**: DR007, M1/M2 剪刀差 (New)
+---
 
-3.  **其他市场**
-    *   **港股**: 恒生科技指数 (60分钟K线/日线)
-    *   **越南**: 越南胡志明指数 (日线)
-    *   **加密货币**: Bitcoin 价格与涨跌幅 (New)
-    *   **美股银行**: 六大行股价趋势
+## 🚀 核心功能
 
-4.  **自动化报告**
-    *   生成 JSON 格式的结构化数据报告
-    *   支持邮件发送日报 (HTML 格式)
+1.  **多源数据采集**:
+    *   **OpenBB**: 负责美股 (七巨头/银行)、外汇、美债收益率、比特币、全球大宗商品 (黄金/铜/原油) 等。
+    *   **AkShare**: 负责 A 股指数 (上证/创业板/科创50)、ETF (科创50/恒生科技)、中国国债、南向资金、中国宏观 (M1/M2) 等。
+    *   **FRED (美联储)**: 负责美国深层宏观数据 (TIPS 实际利率, TGA 账户, ON RRP)。
+    *   **Selenium 爬虫**: 负责补充 Investing.com 和 Eastmoney 上的特定经济数据 (如韩国出口、越南 FDI、CPI、PMI)。
 
-## 技术架构更新 (2025)
+2.  **分层架构**:
+    *   严格分离配置、数据源、采集逻辑与数据处理，便于维护。
 
-本项目已完成重构，从原本的 `yfinance` + `selenium` 混合模式迁移至更稳定、专业的 API 组合：
+3.  **每日报告**:
+    *   输出标准 JSON 格式全量报告。
+    *   实时监控数据获取状态，支持日志追踪。
 
-*   **OpenBB Platform (SDK v4)**: 接管所有海外数据（美股、美债、外汇、宏观）。通过统一接口调用 Yahoo Finance, FRED, FMP 等数据源。
-*   **AkShare**: 继续作为A股和中国宏观数据的核心数据源。
-*   **Selenium**: 仅保留极少数 API 无法覆盖的特殊数据抓取。
+---
 
-## 安装与使用
+## 📂 项目结构
 
-1.  **安装依赖**
-    ```bash
-    pip install -r requirements.txt
-    ```
-    *确保已安装 Python 3.9+ 以支持 OpenBB v4*
+```text
+MarketRadar/
+├── config/                 # 配置层
+│   └── settings.py         # 核心配置文件 (目标列表, API配置, 时间范围)
+│
+├── src/                    # 源码层
+│   ├── data_sources/       # 数据源层 (API/爬虫封装)
+│   │   ├── providers.py    # OpenBB, AkShare, FRED 包装类
+│   │   └── selenium_*.py   # Selenium 爬虫脚本
+│   ├── collectors/         # 采集层 (业务调度)
+│   │   └── manager.py      # 采集总控
+│   ├── processors/         # 处理层 (清洗/计算)
+│   │   └── core.py         # 均线计算, 数据标准化
+│   ├── formatters/         # 格式化层 (输出)
+│   │   └── json_fmt.py     # JSON 组装
+│   └── utils/              # 工具库 (日志/算法)
+│
+├── legacy/                 # 旧版代码归档 (参考用)
+├── main.py                 # 程序唯一入口
+├── requirements.txt        # 依赖列表
+└── README.md               # 本文档
+```
 
-2.  **运行程序**
-    ```bash
-    python main.py
-    ```
+---
 
-3.  **产出物**
-    *   `MarketRadar_Report.json`: 包含所有指标的完整数据文件
-    *   `market_data_status.txt`: 运行日志与状态检查
+## 🛠️ 安装与使用
 
-## 目录结构
-*   `fetch_data_core.py`: 数据获取核心逻辑 (OpenBB & AkShare)
-*   `main.py`: 主程序流程控制与报告生成
-*   `utils.py`: 通用工具函数 (均线计算等)
-*   `Ref/`: 接口文档参考
+### 1. 安装依赖
 
-## 近期更新
-*   [2026-01-17] 迁移至 OpenBB SDK，移除 yfinance 直接依赖。新增 M1/M2, TIPS, Bitcoin 等监控指标。
+```bash
+pip install -r requirements.txt
+```
+
+### 2. 配置说明
+
+*   **API Keys**:
+    *   `Fred_API_KEY`: 若需获取美联储 FRED 数据，请在环境变量中设置。
+*   **邮箱通知**:
+    *   在 `config/settings.py` 或环境变量中配置 `SENDER_EMAIL` 等信息以启用邮件推送。
+*   **采集目标**:
+    *   所有监控的股票、指数、宏观指标均在 `config/settings.py` 中定义。如需增加新的监控标的，直接修改该文件即可，无需改动核心代码。
+
+### 3. 运行
+
+```bash
+python main.py
+```
+
+程序运行结束后，会生成最新的 JSON 数据报告。
+
+---
+
+## 📊 支持指标概览
+
+| 类别 | 包含内容 | 数据源 |
+| :--- | :--- | :--- |
+| **全球指数** | 纳斯达克, 标普500, 恒生科技, 越南VN30, A股主要指数 | OpenBB / AkShare |
+| **宏观经济** | 中国 M1/M2/社融/CPI, 美国非农/CPI/PMI, 韩国出口 | AkShare / Selenium |
+| **美债/货币** | 10年期美债, TIPS实际利率, TGA账户, 逆回购ON RRP | OpenBB / FRED |
+| **大宗商品** | 黄金, 白银, 铜, 原油, 铀 | OpenBB / AkShare |
+| **加密货币** | 比特币 (BTC-USD) | OpenBB |
+| **行业数据** | 港股创新药, 科创50融资融券/量比, 半导体ETF | AkShare |
+
+---
+
+## 📝 开发者指南
+
+*   **新增数据源**: 在 `src/data_sources` 中继承 `BaseSource` 实现新类。
+*   **修改清洗规则**: 在 `src/processors/core.py` 中调整逻辑。
+*   **旧代码**: `legacy/` 目录下保留了重构前的原始脚本，可做逻辑对照参考。
