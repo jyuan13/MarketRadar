@@ -103,8 +103,7 @@ class AkShareSource(BaseSource):
     def fetch_future_daily(self, symbol):
         # 上海金 au0
         try:
-             df = ak.futures_zh_spot(symbol=symbol, market="CF", adjust='0')
-             # This might return current spot? For history: futures_zh_daily_sina(symbol='au0')
+             # Just fetch daily history. Spot call was unnecessary and potentially error-prone.
              df = ak.futures_zh_daily_sina(symbol=symbol)
              if df.empty: return None, "Empty"
              df = df.rename(columns={"date":"date", "open":"open", "close":"close", "high":"high", "low":"low", "volume":"volume"})
