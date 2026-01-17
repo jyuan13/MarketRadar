@@ -45,53 +45,59 @@ class JsonFormatter:
             "HK_Pharma": "港股创新药",
             "Star50_ETF": "科创50ETF",
             "Star50_Holdings": "科创50持仓",
-            "US_Banks": "美股银行"
+            "US_Banks": "美股银行" # Legacy didn't strictly have this in top grouping but we can add or merge? 
+            # In legacy `main.py`, US Banks were just fetched but maybe not in a specific named group? 
+            # Actually legacy `main.py` did NOT add US Banks to `all_data_collection` via `market_core` groups?
+            # Wait, `fetch_us_banks_daily` was called separately in `main.py` and added to `kline_data_dict["data"]`.
+            # So "美股银行" key is probably fine or we just let "US_Banks" map to whatever.
         }
         
-        data_section = {}
-        for cfg_cat, report_key in cat_map.items():
-            if cfg_cat in groups:
-                # Flatten the dictionary {ticker: [rows]} into a single list of rows
-                # Legacy format: Flat list of all records for the category, sorted by Date DESC, Name ASC
-                flat_rows = []
-                for ticker_rows in groups[cfg_cat].values():
-                    if isinstance(ticker_rows, list):
-                        flat_rows.extend(ticker_rows)
-                
-                # Sort: Date (desc), Name (asc)
-                # Ensure date is comparable (string is fine if format is YYYY-MM-DD)
-                try:
-                    flat_rows.sort(key=lambda x: (x.get('date', ''), x.get('name', '')), reverse=False)
-                    # Legacy sort was: df.sort_values(by=['date', 'name'], ascending=[False, True])
-                    # So primary key Date is Descending, Name is Ascending.
-                    # Python sort is stable. We can sort by Name (Asc) first, then Date (Desc).
-                    flat_rows.sort(key=lambda x: x.get('name', '')) # Ascending Name
-                    flat_rows.sort(key=lambda x: x.get('date', ''), reverse=True) # Descending Date
-                except Exception as e:
-                    print(f"Sort error for {cfg_cat}: {e}")
-                
-                data_section[report_key] = flat_rows
-            else:
-                 data_section[report_key] = []
+        market_klines = {}
+        
+        for cfg_cat, ticker_rows in groups.items():
+            report_key = cat_map.get(cfg_cat, cfg_cat) # Fallback to config name
+            
+            # Flatten the dictionary {ticker: [rows]} into a single list of rows
+            flat_rows = []
+            if isinstance(ticker_rows, dict):
+                for rows in ticker_rows.values():
+                    if isinstance(rows, list):
+                        flat_rows.extend(rows)
+            elif isinstance(ticker_rows, list):
+                 flat_rows.extend(ticker_rows)
+            
+            # Sort: Name (asc), Date (desc)
+            try:
+                flat_rows.sort(key=lambda x: x.get('name', '')) # Ascending Name
+                flat_rows.sort(key=lambda x: x.get('date', ''), reverse=True) # Descending Date
+            except Exception as e:
+                print(f"Sort error for {cfg_cat}: {e}")
+            
+            market_klines[report_key] = flat_rows
 
         merged = {
             "meta": metadata,
-            "data": data_section,
-            "ma_data": { # Reverted from "技术分析"
-                "general": collectors_data.get("ma_general", []),      # Reverted from "指数+个股日均线"
-                "commodities": collectors_data.get("ma_commodities", [])
+            # Legacy Key: market_klines (was data_section)
+            "market_klines": market_klines,
+            
+            # Legacy Key: 技术分析
+            "技术分析": {
+                "指数+个股日均线": collectors_data.get("ma_general", []),
+                "大宗商品": collectors_data.get("ma_commodities", [])
             },
-            # Extra data collected by new scrapers/APIs can stay or be hidden if strict adherence is required.
-            # User asked "is there any omission?", implying extras are fine but defaults must be there.
-            # We keep these as they provide value, but ensure core structure is identical.
+            
+            # Legacy Keys for Macro/Detail sections
             "market_fx": collectors_data.get("macro_fx", {}),
             "china": collectors_data.get("macro_china", {}),
             "usa": collectors_data.get("macro_usa", {}),
             "japan": collectors_data.get("macro_japan", {}),
             "hk": collectors_data.get("macro_hk", {}),
             "科创50": collectors_data.get("star50", {}),
+            
+            # Optional extra
             "加密货币": collectors_data.get("crypto", {})
         }
+        
         return self.clean_data(merged)
 
     def save_to_file(self, data, filename):
