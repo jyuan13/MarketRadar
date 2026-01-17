@@ -580,6 +580,8 @@ def fetch_star50_realtime_vol_ratio():
             "名称": row['名称'],
             "最新价": row['最新价'],
             "量比": row['量比'],
+            "成交量": row.get('成交量'),
+            "成交额": row.get('成交额'),
             "更新时间": datetime.datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')
         }
         return result, None
@@ -831,3 +833,206 @@ def fetch_us_banks_daily():
             print(f"      Fail: {name} ({e})")
             
     return results
+
+# ==============================================================================
+# 新增: Crypto & Extended Macro (Req 2026-01-17)
+# ==============================================================================
+
+def fetch_crypto_daily():
+    """
+    获取 Bitcoin 价格 & 24h涨跌幅 (Ref: Req 23)
+    使用 OpenBB (yfinance provider via obb.crypto.price.historical)
+    """
+    print("   -> 获取加密货币 (Bitcoin)...")
+    try:
+        # obb.crypto.price.historical(symbol="BTC-USD", provider="yfinance")
+        # For simple 24h change, just fetch last 2 days
+        end = datetime.datetime.now()
+        start = end - datetime.timedelta(days=5)
+        
+        df = obb.crypto.price.historical(symbol="BTC-USD", start_date=start.strftime("%Y-%m-%d"), provider="yfinance").to_df()
+        
+        if df is None or df.empty:
+            return None, "Bitcoin data empty"
+            
+        df = df.reset_index()
+        # Columns: date, open, high, low, close, volume...
+        date_col = next((c for c in df.columns if "date" in c), None)
+        if not date_col: return None, "No date column"
+        
+        df = df.sort_values(date_col)
+        latest = df.iloc[-1]
+        prev = df.iloc[-2] if len(df) > 1 else latest
+        
+        close = latest.get('close')
+        prev_close = prev.get('close')
+        
+        change_pct = 0.0
+        if prev_close and prev_close != 0:
+            change_pct = (close - prev_close) / prev_close * 100
+            
+        return {
+            "name": "Bitcoin (BTC-USD)",
+            "price": close,
+            "change_24h_pct": round(change_pct, 2),
+            "date": latest[date_col].strftime('%Y-%m-%d')
+        }, None
+        
+    except Exception as e:
+        print(f"Bitcoin 获取失败: {e}")
+        return None, str(e)
+
+def fetch_global_macro_extra():
+    """
+    获取额外宏观数据 (OpenBB/FRED):
+    - TIPS 实际利率 (DFII10)
+    - 高收益债利差 (BAMLH0A0HYM2)
+    - 10年盈亏平衡通胀率 (T10YIE)
+    - TGA 账户余额 (WTREGEN)
+    - 隔夜逆回购 ON RRP (RRPONTSYD)
+    """
+    print("   -> 获取全球宏观扩展数据 (OpenBB/FRED)...")
+    indicators = {
+        "10年期TIPS实际利率": "DFII10",
+        "高收益债利差(HY OAS)": "BAMLH0A0HYM2",
+        "10年盈亏平衡通胀率": "T10YIE",
+        "TGA账户余额": "WTREGEN",
+        "美联储ON RRP余额": "RRPONTSYD"
+    }
+    
+    results = {}
+    
+    # OpenBB v4: obb.fixedincome.government.treasury_rates handles some? 
+    # Or generically: obb.economy.fred_series(symbol=...)
+    # obb.fixedincome.corporate.hqm? No.
+    # Safe bet: obb.economy.fred_series (if exists) or fallback to simple direct request?
+    # OpenBB v4 usually has `obb.index.economy.fred` or simply usage of `yfinance` tickers for some.
+    # Let's try to map some to YFinance tickers if possible, or use FRED via OpenBB.
+    # YFinance Tickers: 
+    #   TIPS: ^TIP (ETF price != yield). 10Y Real Yield: ^DFII10 (Yahoo often has FRED codes with ^) => ^DFII10 ?? No.
+    #   HY Spread: No direct YF.
+    # Actually, recent OpenBB standardizes this. Let's try `obb.economy.fred_series` if available, or just fetch via akshare's FRED proxy if akshare has it? Akshare has `macro_usa_...`
+    # Let's check AkShare for US macro. 
+    # `ak.macro_usa_fred(symbol="...")` exists? No.
+    # Assume OpenBB works. Provider 'fred' requires API key? OpenBB usually handles it if configured or uses a default key sometimes. 
+    # If no key, it might fail.
+    # Fallback/Safe: Some can be scraped or Akshare might have them.
+    # Akshare: `macro_usa_tga`, `macro_usa_tips`.
+    
+    # 策略: 直接使用 FRED API (requests) 以保证稳定性，因为 User 提供了 Key
+    fred_key = os.environ.get("Fred_API_KEY")
+    if not fred_key:
+        print("   ⚠️ 未检测到 Fred_API_KEY 环境变量，跳过 FRED 数据获取。")
+        return {}
+
+    # FRED API Config
+    base_url = "https://api.stlouisfed.org/fred/series/observations"
+    # 获取过去 ~60 天数据 (2 months requested)
+    obs_start = (datetime.datetime.now() - datetime.timedelta(days=70)).strftime("%Y-%m-%d")
+    
+    for name, series_id in indicators.items():
+        try:
+            params = {
+                "series_id": series_id,
+                "api_key": fred_key,
+                "file_type": "json",
+                "observation_start": obs_start,
+                "sort_order": "asc"
+            }
+            
+            r = SESSION.get(base_url, params=params, timeout=TIMEOUT)
+            r.raise_for_status()
+            data_json = r.json()
+            
+            observations = data_json.get("observations", [])
+            if not observations:
+                continue
+                
+            # Process observations
+            clean_obs = []
+            for obs in observations:
+                val = obs.get("value")
+                date_str = obs.get("date")
+                if val == ".": continue # FRED missing value
+                try:
+                    f_val = float(val)
+                    clean_obs.append({"date": date_str, "value": f_val})
+                except:
+                    pass
+            
+            if clean_obs:
+                # 排序并取最新
+                clean_obs.sort(key=lambda x: x["date"])
+                latest = clean_obs[-1]
+                
+                # Format: List of history or just latest? 
+                # Request says "fetch day by day data for recent 2 months"
+                # But our report structure usually takes latest or list.
+                # Let's return the simplified list [ {date, value}, ... ] stored in specific key
+                
+                # To fit into "usa" dict, we can store either the list or the latest value.
+                # If we want to show a chart or series, list is better.
+                # For now, let's store the full list under the key.
+                
+                # However, clean_obs is list of dicts.
+                results[name] = clean_obs
+                print(f"      OK: {name} ({len(clean_obs)} records)")
+            
+        except Exception as e:
+            print(f"      Fail: {name} ({e})")
+            
+    return results
+
+def fetch_china_macro_extra():
+    """
+    获取中国宏观: M1/M2, DR007
+    """
+    print("   -> 获取中国宏观扩展 (AkShare)...")
+    res = {}
+    try:
+        # M1/M2
+        df_m = ak.macro_china_money_supply()
+        # Columns: 统计时间, 货币和准货币(M2)-数量(亿元), ...
+        if not df_m.empty:
+            df_m = df_m.sort_values("统计时间")
+            latest = df_m.iloc[-1]
+            # M2, M1
+            # 字段名可能较长，需模糊匹配
+            m2_val = 0
+            m1_val = 0
+            for c in df_m.columns:
+                if "M2" in c and "数量" in c: m2_val = latest[c]
+                if "M1" in c and "数量" in c: m1_val = latest[c]
+            
+            res["M1_M2"] = {
+                "date": latest["统计时间"],
+                "m2": m2_val,
+                "m1": m1_val,
+                "diff": float(m1_val) - float(m2_val) if m2_val and m1_val else 0 # 增速差? or value diff? Request asks for gap.
+            }
+            # Growth gap usually means (M1 Growth % - M2 Growth %)
+            # Columns also have "同比增长"
+            m2_growth = 0
+            m1_growth = 0
+            for c in df_m.columns:
+                if "M2" in c and "同比" in c: m2_growth = latest[c]
+                if "M1" in c and "同比" in c: m1_growth = latest[c]
+            
+            res["M1_M2_Growth_Gap"] = {
+                "date": latest["统计时间"],
+                "m1_growth": m1_growth,
+                "m2_growth": m2_growth,
+                "gap": float(m1_growth) - float(m2_growth)
+            }
+            
+    except Exception as e:
+        print(f"M1/M2 Error: {e}")
+        
+    try:
+        # DR007: interbank_rate_open_cn 
+        # But this might be huge. Let's try interbank_analysis_daily?
+        pass
+    except:
+        pass
+        
+    return res

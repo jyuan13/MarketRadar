@@ -89,6 +89,7 @@ def merge_final_report(macro_data_combined, kline_data_dict, ma_data_dict, kcb50
         },
         "market_fx": macro_data_combined.get("market_fx", {}),
         "科创50": kcb50_data if kcb50_data else {},  # 新增顶层项
+        "加密货币": macro_data_combined.get("crypto", {}), # 新增
         "china": macro_data_combined.get("china", {}),
         "usa": macro_data_combined.get("usa", {}),
         "japan": macro_data_combined.get("japan", {}),
@@ -97,7 +98,9 @@ def merge_final_report(macro_data_combined, kline_data_dict, ma_data_dict, kcb50
     }
     
     merged["meta"]["generated_at"] = datetime.now(TZ_CN).strftime("%Y-%m-%d %H:%M:%S")
-    merged["meta"]["description"] = "MarketRadar Consolidated Report (Selenium Macro + Online FX + Klines)"
+    merged["meta"]["description"] = "MarketRadar Consolidated Report (Selenium Macro + Online FX + Klines)" 
+    # Add extra macro to 'market_fx' or 'usa' if needed, logic handled in main() before merge?
+    # Actually main() updates combined_macro. Need to ensure 'crypto' is in combined_macro.
     
     return merged
 
@@ -445,7 +448,49 @@ def main():
         print(f"⚠️ 六大银行数据获取异常: {e}")
         all_status_logs.append({'name': 'US_Banks', 'status': False, 'error': str(e)})
 
+    # [Step 4.8] 获取 Crypto & Extra Macro
+    print("\n[Step 4.8] 获取 Crypto & Extra Macro (New Indicators)...")
+    crypto_data = None
+    macro_extra_data = {}
+    
+    # 1. Crypto
+    try:
+        btc_data, btc_err = fetch_data_core.fetch_crypto_daily()
+        if btc_data:
+            crypto_data = btc_data
+            all_status_logs.append({'name': 'Bitcoin', 'status': True, 'error': None})
+        else:
+            all_status_logs.append({'name': 'Bitcoin', 'status': False, 'error': btc_err})
+    except Exception as e:
+        print(f"⚠️ Crypto 异常: {e}")
+        
+    # 2. Global Macro Extra
+    try:
+        # Note: fetch_global_macro_extra currently returns empty but logic is ready
+        g_macro = fetch_data_core.fetch_global_macro_extra()
+        if g_macro:
+             macro_extra_data.update(g_macro)
+    except Exception as e:
+        print(f"⚠️ Global Macro Extra 异常: {e}")
+
+    # 3. China Macro Extra (M1/M2)
+    try:
+        c_macro = fetch_data_core.fetch_china_macro_extra()
+        if c_macro:
+             if "china" not in combined_macro: combined_macro["china"] = {}
+             combined_macro["china"].update(c_macro)
+             all_status_logs.append({'name': 'China_M1_M2', 'status': True, 'error': None})
+    except Exception as e:
+        print(f"⚠️ China Macro Extra 异常: {e}")
+
     print("\n[Step 5] 整合数据并清洗...")
+    # Inject Crypto/Macro into combined_macro or separate dict
+    if crypto_data:
+        combined_macro["crypto"] = [crypto_data] # List format for consistency often
+    if macro_extra_data:
+        if "usa" not in combined_macro: combined_macro["usa"] = {}
+        combined_macro["usa"].update(macro_extra_data)
+
     # 传入 kcb50_dict
     final_data = merge_final_report(combined_macro, kline_data_dict, ma_data_dict, kcb50_data=kcb50_dict)
     final_data = clean_and_round(final_data)

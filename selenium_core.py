@@ -32,7 +32,9 @@ class MacroDataScraper:
             "USA_Initial_Jobless": "https://www.investing.com/economic-calendar/initial-jobless-claims-294",
             "CBOE_SKEW": "https://www.investing.com/indices/cboe-skew-historical-data",
             "Insider_BuySell_Ratio_USA": "https://www.gurufocus.com/economic_indicators/4359/insider-buysell-ratio-usa-overall-market",
-            "USA_ISM_New_Orders": "https://www.investing.com/economic-calendar/ism-manufacturing-new-orders-index-1483"
+            "USA_ISM_New_Orders": "https://www.investing.com/economic-calendar/ism-manufacturing-new-orders-index-1483",
+            "韩国_出口同比": "https://www.investing.com/economic-calendar/south-korean-export-growth-1316",
+            "越南_FDI": "https://www.investing.com/economic-calendar/vietnamese-foreign-direct-investment-(usd)-1857"
         }
 
         self.key_mapping = {
@@ -56,7 +58,10 @@ class MacroDataScraper:
             "USA_Initial_Jobless": ("usa", "Initial_Jobless_Claims"),
             "CBOE_SKEW": ("market_fx", "CBOE_SKEW"),
             "Insider_BuySell_Ratio_USA": ("usa", "Insider_BuySell_Ratio"),
-            "USA_ISM_New_Orders": ("usa", "ISM_Manufacturing_New_Orders")
+            "Insider_BuySell_Ratio_USA": ("usa", "Insider_BuySell_Ratio"),
+            "USA_ISM_New_Orders": ("usa", "ISM_Manufacturing_New_Orders"),
+            "韩国_出口同比": ("market_fx", "Korea_Exports_YoY"),
+            "越南_FDI": ("market_fx", "Vietnam_FDI")
         }
         
         self.results = {}
@@ -97,6 +102,10 @@ class MacroDataScraper:
         
         if name == "Fed_Rate_Monitor":
             return selenium_scrapers_investing.fetch_fed_rate_monitor(name, url, self.chrome_options)
+
+        if name in ["韩国_出口同比", "越南_FDI"]:
+             # 获取近 6 个月数据
+             return selenium_scrapers_investing.fetch_investing_economic_calendar(name, url, self.chrome_options, days_to_keep=180)
 
         # 3. 专用抓取逻辑 (其他来源)
         if name == "CNN_FearGreed":
