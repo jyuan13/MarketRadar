@@ -20,7 +20,7 @@ class ConfigManager:
             "Indices": [
                 {"name": "纳斯达克", "ak": ".NDX", "yf": "^NDX", "provider": "openbb"},
                 {"name": "标普500", "ak": ".INX", "yf": "^GSPC", "provider": "openbb"},
-                {"name": "恒生科技", "ak": "HSTECH", "yf": "^HSTECH", "provider": "openbb"},
+                {"name": "恒生科技", "ak": "HSTECH", "yf": "HSTECH.HK", "provider": "openbb"},
                 {"name": "恒生指数", "ak": "HSI", "yf": "^HSI", "provider": "openbb"},
                 {"name": "VNM(ETF)", "ak": "VNM", "yf": "VNM", "provider": "openbb"},
                 {"name": "XBI(ETF)", "ak": "XBI", "yf": "XBI", "provider": "openbb"},

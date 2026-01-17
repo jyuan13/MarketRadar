@@ -20,7 +20,7 @@ def main():
     
     # Storage for gathered data
     collected_data = {
-        "klines": {},
+        "groups": {}, # Store by category name e.g. "Indices": [...]
         "ma_general": [],
         "ma_commodities": [],
         "macro_usa": {},
@@ -28,18 +28,25 @@ def main():
         # ...
     }
     
-    # 3. Execution - K-Lines
+    # 3. Execution - K-Lines & Components
     print("   [1/3] Collection K-Lines...")
     
-    # Indices
-    k_idx, ma_idx = collector.collect_klines("Indices")
-    collected_data["klines"].update(k_idx)
-    collected_data["ma_general"].extend(ma_idx)
-    
-    # Commodities
-    k_com, ma_com = collector.collect_klines("Commodities")
-    collected_data["klines"].update(k_com)
-    collected_data["ma_commodities"].extend(ma_com) # Separate logic?
+    # Iterate all categories in config
+    for category in cfg.TARGETS_KLINES.keys():
+        k_res, ma_res = collector.collect_klines(category)
+        
+        # Convert dict {name: data} to list of records [ {name:..., data:...} ] match legacy format?
+        # Legacy format: "data": { "指数": [ {name:..., ...}, ... ] }
+        # collectors.collect_klines returns {name: [rows...]}
+        
+        # We need to store it so formatter can map it.
+        collected_data["groups"][category] = k_res
+        
+        # Categorize MA data
+        if category == "Commodities":
+            collected_data["ma_commodities"].extend(ma_res)
+        else:
+            collected_data["ma_general"].extend(ma_res)
     
     # Others...
     # (In full implementation, loop through all categories in Config)
