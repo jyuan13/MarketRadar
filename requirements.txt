@@ -1,6 +1,6 @@
 pandas
 akshare
-yfinance
+openbb
 requests
 selenium
 numpy
