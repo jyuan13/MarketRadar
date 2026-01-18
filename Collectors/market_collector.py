@@ -9,10 +9,11 @@ from DataSources.web_scraper import WebScraper
 from Processors.data_processor import DataProcessor
 from Processors.technical_analysis import TechnicalAnalysis
 try:
-    from config.settings import FRED_SERIES, REPORT_DAYS
+    from config.settings import FRED_SERIES, REPORT_DAYS, MACRO_DAYS
 except ImportError:
     FRED_SERIES = {}
     REPORT_DAYS = 30
+    MACRO_DAYS = 180
 
 # ==============================================================================
 # Targets Configuration (Migrated from MarketRadar.py)
@@ -237,10 +238,10 @@ class MarketCollector:
         
         # FRED Series (Inflation, TGA, Liquidity)
         for sid, name in FRED_SERIES.items():
-            d, _ = self.obb.fetch_fred_series(sid)
+            # [Modified] Use MACRO_DAYS (180+) and store full list
+            d, _ = self.obb.fetch_fred_series(sid, days=MACRO_DAYS)
             if d:
-                # Store latest value
-                data["usa"][name] = d[0].get("value")
+                data["usa"][name] = d
                 
         # US Treasury Rates
         bonds, _ = self.obb.fetch_treasury_rates()
@@ -250,8 +251,6 @@ class MarketCollector:
         # Akshare Data (Southbound, A-Share Indices)
         sb, _ = self.ak.fetch_southbound_flow(days=10)
         if sb:
-            # Sum last 5 days? Or just show latest? Legacy showed chart or list.
-            # We'll store list for now.
             data["china"]["南向资金"] = sb
             
         ashare, _ = self.ak.fetch_ashare_indices()

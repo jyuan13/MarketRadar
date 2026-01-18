@@ -11,7 +11,9 @@ from zoneinfo import ZoneInfo
 TZ_CN = ZoneInfo("Asia/Shanghai")
 
 # 报告时间范围 (最近 N 天的数据)
-REPORT_DAYS = 30  # 默认获取最近30天，部分指标可能需要更长
+# 报告时间范围 (最近 N 天的数据)
+REPORT_DAYS = 30   # K线图数据 (日频)
+MACRO_DAYS = 180   # 宏观经济数据 (月频/周频), 确保能覆盖近6个月
 
 # API Keys
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
@@ -43,6 +45,8 @@ FRED_SERIES = {
     "M2SL": "M2 Money Stock",
     "M1SL": "M1 Money Stock",
     "WALCL": "Total Assets (Fed Balance Sheet)", # 用于全球流动性代理
+    "PCEPI": "Personal Consumption Expenditures Price Index (PCE Headline)",
+    "PCEPILFE": "Core PCE Price Index (Exclude Food & Energy)",
 }
 
 # Akshare Symbols
