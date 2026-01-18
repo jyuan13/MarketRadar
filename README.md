@@ -1,49 +1,69 @@
-# MarketRadar - 全球金融市场数据聚合雷达
+# MarketRadar Refactored - 全球金融市场数据聚合雷达
 
-MarketRadar 是一个自动化的金融数据聚合工具，旨在为投资者提供全方位的市场快照。它集成了全球主要指数、关键汇率、国债收益率以及宏观经济指标，并进行技术分析（均线计算），最终生成一份结构化的 JSON 数据报告并通过邮件发送。
+MarketRadar 是一个自动化的金融数据聚合工具，旨在为投资者提供全方位的市场快照。它现在采用分层架构，集成了 **OpenBB**, **Akshare** 和 **Web Scraping** 技术，提供更稳健的数据获取和更丰富的宏观指标。
 
 ## 🎯 核心功能
 
 ### 1. 全球市场 K线与技术分析
-自动抓取全球主要投资标的的 **K线数据（OHLCV）**，并计算 **5日、10日、20日、60日、120日、250日（年线）** 移动平均线。
+自动抓取全球主要投资标的的 **K线数据（OHLCV）**，并计算 **5日、10日、20日、60日、120日、250日（年线）** 移动平均线，以及 **MACD, KDJ, RSI** 技术指标。
 
-* **全球指数**: 纳斯达克 (.IXIC), 标普500 (.INX), 恒生指数 (HSI), 恒生科技指数 (HSTECH), 越南胡志明指数 (VNINDEX)。
-* **大宗商品**: 黄金 (COMEX GC), 白银 (COMEX SI), 铜 (COMEX HG), 上海金 (主力合约)。
-* **核心个股**:
-    * **美股七巨头**: Apple, Microsoft, Nvidia, Google, Amazon, Meta, Tesla。
-    * **港股科技**: 腾讯, 阿里, 美团, 小米, 快手等 Top 20 成分股。
-    * **港股医药**: 信达生物, 百济神州, 药明康德等创新药龙头。
-    * **新兴市场**: 越南股市 Top 10 权重股 (VinGroup, 移动世界, 和发集团等)。
+* **全球指数**: 纳斯达克, 标普500, 恒生指数, 恒生科技, 越南胡志明指数。
+* **大宗商品**: 黄金, 白银, 铜, 上海金, 原油, 铀。
+* **核心个股**: 美股七巨头, 港股科技 Top 20, 港股创新药, 新兴市场龙头。
 
 ### 2. 宏观经济指标 (Macro Data)
-利用自动化浏览器技术（Selenium）抓取关键的宏观经济数据，支持历史数据回溯。
+* **OpenBB / FRED**: 
+    * TIPS 收益率, 期限溢价 (Term Premium)
+    * TGA 账户余额, 逆回购 (ON RRP)
+    * 全球流动性代理 (Global Liquidity)
+    * 信用利差 (High Yield OAS)
+* **Investing.com 爬虫**: 
+    * 韩国出口同比增长
+    * 越南外商直接投资 (FDI)
+* **Akshare**: 
+    * 南向资金流向
+    * A股主要指数
 
-* **中国**: CPI, PPI, PMI (制造业/非制造业), 货币供应量 (M1/M2), 贷款市场报价利率 (LPR), 南向资金流向。
-* **美国**: 非农就业数据 (Non-Farm), 失业率, ISM 制造业/非制造业 PMI, 利率决议 (Fed Rate), 核心零售销售。
-* **日本**: 央行利率决议。
+### 3. 系统架构 (Refactored)
 
-### 3. 国债收益率与汇率 (Bonds & FX)
-实时监控主要经济体的无风险利率和货币波动，作为大类资产配置的锚点。
+项目已重构为分层架构，以提高可维护性和扩展性：
 
-* **国债收益率**:
-    * **美国**: 13周, 5年, 10年, 30年。
-    * **中国**: 1年, 2年, 10年, 30年。
-    * **日本**: 2年, 10年, 30年 (从 Investing.com 实时抓取)。
-* **外汇与波动率**:
-    * **VIX 恐慌指数**: 衡量市场风险偏好。
-    * **汇率**: 美元/人民币 (USD/CNY), 美元/日元 (USD/JPY), 美元/越南盾 (USD/VND)。
+* **`config/`**: 配置中心，管理 API Key (FRED) 和全局参数。
+* **`DataSources/`**: 数据源适配器层。
+    * `openbb_source.py`: OpenBB 接口封装 (美股, 美债, FRED)。
+    * `akshare_source.py`: Akshare 接口封装 (A股, 港股通)。
+    * `web_scraper.py`: Selenium/Requests 爬虫 (Investing.com)。
+* **`Collectors/`**: 数据采集层。
+    * `market_collector.py`: 核心采集器，并发调度各个数据源。
+* **`Processors/`**: 数据处理层。
+    * `data_processor.py`: 数据清洗、均线计算。
+    * `technical_analysis.py`: 技术指标计算 (MyTT)。
+* **`Formatters/`**: 格式化层。
+    * `json_formatter.py`: JSON 报告生成。
+* **`MessageBus/`**: 消息总线。
+    * `email_service.py`: 邮件发送服务。
+* **`main.py`**: 程序入口。
 
-### 4. 数据清洗与报告生成
-* **自动容错**: 内置 AkShare, YFinance, Investing.com, FMP 等多重数据源，具备自动重试和备用源切换机制，确保数据获取的高可用性。
-* **数据标准化**: 将不同来源的数据统一清洗为标准格式（日期, 开/高/低/收, 成交量）。
-* **报告输出**:
-    * `MarketRadar_Report.json`: 包含所有元数据、技术指标和宏观数据的全量报告。
-    * `market_data_status.txt`: 详细的运行状态日志，记录每个数据点的抓取状态（成功/失败/重试）。
-* **邮件推送**: 任务完成后自动将报告和日志通过 SSL 加密通道发送至指定邮箱。
+## 🚀 快速开始
 
-## 🏗️ 模块架构
+1. **安装依赖**
+   ```bash
+   pip install -r requirements.txt
+   ```
+   *注意：OpenBB 包较大，建议在虚拟环境中安装。*
 
-* **`MarketRadar.py`**: 主程序协调器。负责 K 线数据的并发抓取、`utils.py` 均线计算调用、数据组装以及邮件发送。
-* **`fetch_data.py`**: 基础数据获取模块。负责 FX（汇率）、VIX、全球国债收益率以及越南指数的特殊处理（爬虫）。
-* **`scrape_economy_selenium.py`**: 宏观数据获取模块。使用 Headless Chrome 浏览器模拟用户行为，抓取网页端的宏观经济日历数据。
-* **`utils.py`**: 通用工具库。核心功能是 `calculate_ma`，用于对任意时间序列数据进行多周期移动平均线计算。
+2. **配置环境**
+   请设置以下环境变量 (或修改 `config/settings.py`)：
+   * `FRED_API_KEY`: FRED 数据接口 Key (必须)。
+   * `SENDER_EMAIL`: 发件人邮箱 (QQ邮箱)。
+   * `SENDER_PASSWORD`: 邮箱授权码。
+   * `RECEIVER_EMAIL`: 收件人邮箱。
+
+3. **运行**
+   ```bash
+   python main.py
+   ```
+
+4. **产出**
+   * `MarketRadar_Report.json`: 包含所有数据的结构化报告。
+   * `market_data_status.txt`: 运行状态日志。

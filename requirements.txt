@@ -5,3 +5,6 @@ requests
 selenium
 numpy
 lxml
+openbb
+fredapi
+scipy
