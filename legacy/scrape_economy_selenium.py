@@ -4,7 +4,7 @@
 # 核心逻辑已移至 selenium_core.py
 # -----------------------------------------------------------------------------
 
-import selenium_core
+import selenium_core_legacy as selenium_core
 import json
 
 def get_macro_data():

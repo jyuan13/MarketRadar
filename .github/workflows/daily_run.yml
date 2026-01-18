@@ -34,6 +34,7 @@ jobs:
         SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
         SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
         RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
-        FMP_API_Key: ${{ secrets.FMP_API_Key }}  # 如果你使用了FMP数据源
+        FMP_API_Key: ${{ secrets.FMP_API_Key }}
+        FRED_API_KEY: ${{ secrets.FRED_API_KEY }}  # Added for FRED data
       run: |
         python main.py

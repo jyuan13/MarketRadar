@@ -152,6 +152,15 @@ def main():
     if not hstech_found:
         print("[WARN] HSTECH data missing or empty.")
     
+    # 8. Notification
+    print("   [6/6] Sending Notification...")
+    notifier = Notifier(cfg, bus)
+    notifier.send_email(
+        subject=f"MarketRadar Report {datetime.datetime.now().strftime('%Y-%m-%d')}",
+        body=summary_text,
+        attachment_files=[output_file]
+    )
+    
     print(f"[DONE] in {time.time() - start_time:.2f}s. Saved to {output_file}")
 
 if __name__ == "__main__":

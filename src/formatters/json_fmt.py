@@ -1,6 +1,7 @@
 # formatters.py
 import json
 import numpy as np
+import re
 
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -45,11 +46,7 @@ class JsonFormatter:
             "HK_Pharma": "港股创新药",
             "Star50_ETF": "科创50ETF",
             "Star50_Holdings": "科创50持仓",
-            "US_Banks": "美股银行" # Legacy didn't strictly have this in top grouping but we can add or merge? 
-            # In legacy `main.py`, US Banks were just fetched but maybe not in a specific named group? 
-            # Actually legacy `main.py` did NOT add US Banks to `all_data_collection` via `market_core` groups?
-            # Wait, `fetch_us_banks_daily` was called separately in `main.py` and added to `kline_data_dict["data"]`.
-            # So "美股银行" key is probably fine or we just let "US_Banks" map to whatever.
+            "US_Banks": "美股银行"
         }
         
         market_klines = {}
@@ -102,8 +99,22 @@ class JsonFormatter:
 
     def save_to_file(self, data, filename):
         try:
+            # 1. Generate standard formatted JSON with indentation
+            json_str = json.dumps(data, cls=NpEncoder, ensure_ascii=False, indent=4)
+            
+            # 2. Post-process to flatten leaf objects (objects without nested objects)
+            # Find { ... } blocks that do not contain other { or } characters
+            # and collapse them to a single line.
+            def collapse_leaf(match):
+                s = match.group(0)
+                # Replace newlines and the indentation spaces following them with a single space
+                return re.sub(r'\n\s*', ' ', s)
+
+            # Apply regex: match { then anything not { or } then }
+            json_str = re.sub(r'\{[^{}]*\}', collapse_leaf, json_str)
+
             with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(data, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+                f.write(json_str)
             return True
         except Exception as e:
             print(f"Write error: {e}")
