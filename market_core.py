@@ -410,6 +410,7 @@ def fetch_group_data(fetcher, targets, group_name, report_start_date, end_date):
 def send_email(subject, body, attachment_files, sender_email, sender_password, receiver_email, smtp_server, smtp_port, enable_email):
     """
     发送带有多个附件的邮件 (QQ邮箱使用 SMTP_SSL:465)
+    [更新] 包含重试机制和超时设置，以应对 GitHub Actions 网络不稳定问题
     """
     if not enable_email:
         print("\n🔕 邮件功能已关闭，跳过发送。")
@@ -452,12 +453,29 @@ def send_email(subject, body, attachment_files, sender_email, sender_password, r
     if attachment_count == 0:
         print("⚠️ 警告: 没有有效附件被添加，仍尝试发送邮件...")
 
-    try:
-        print(f"🚀 连接 SMTP 服务器 {smtp_server}:{smtp_port} (SSL) 并发送...")
-        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, receiver_email, msg.as_string())
-        server.quit()
-        print("✅ 邮件发送成功！")
-    except Exception as e:
-        print(f"❌ 邮件发送失败: {e}")
+    # 重试逻辑
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"🚀 连接 SMTP 服务器 {smtp_server}:{smtp_port} (SSL) [第 {attempt}/{max_retries} 次尝试]...")
+            
+            # 设置超时时间为 30 秒
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30)
+            
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+            server.quit()
+            print("✅ 邮件发送成功！")
+            return
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"❌ 邮件发送失败: {error_msg}")
+            
+            if attempt < max_retries:
+                # 递增等待时间
+                wait_time = attempt * 5
+                print(f"   ⏳ 等待 {wait_time} 秒后重试...")
+                time.sleep(wait_time)
+            else:
+                print("❌ 最终发送失败，请检查网络配置或 SMTP 服务状态。")
