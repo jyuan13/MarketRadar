@@ -26,7 +26,7 @@ jobs:
       run: |
         # 升级 pip 并安装依赖
         python -m pip install --upgrade pip
-        if [ -f MarketRadar/requirements.txt ]; then pip install -r MarketRadar/requirements.txt; fi
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         # 确保安装核心库 (防止 requirements.txt 缺失)
         pip install pandas numpy requests akshare yfinance lxml selenium webdriver-manager
 
@@ -62,4 +62,4 @@ jobs:
         # 运行主程序并传入时段标签
         # 假设 main.py 位于 MarketRadar 目录下
         # sys.path[0] 将指向 MarketRadar 目录，确保内部 import 正常
-        python MarketRadar/main.py "$PERIOD_TAG"
+        python main.py "$PERIOD_TAG"
