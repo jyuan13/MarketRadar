@@ -26,16 +26,8 @@ jobs:
       run: |
         # 升级 pip 并安装依赖
         python -m pip install --upgrade pip
-        
-        # [修正] 移除目录前缀，兼容根目录结构
-        if [ -f requirements.txt ]; then 
-          pip install -r requirements.txt
-        elif [ -f MarketRadar/requirements.txt ]; then
-          # 兼容备用：如果文件确实在子目录
-          pip install -r MarketRadar/requirements.txt
-        fi
-        
-        # 确保安装核心库 (防止 requirements.txt 缺失或安装不全)
+        if [ -f MarketRadar/requirements.txt ]; then pip install -r MarketRadar/requirements.txt; fi
+        # 确保安装核心库 (防止 requirements.txt 缺失)
         pip install pandas numpy requests akshare yfinance lxml selenium webdriver-manager
 
     - name: Run MarketRadar
@@ -44,7 +36,7 @@ jobs:
         SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
         SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
         RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
-        # [保留] FMP Key 以防备用
+        # [恢复] FMP Key 以防备用
         FMP_API_Key: ${{ secrets.FMP_API_Key }}
         # [新增] Alpha Vantage Key 用于国债数据备用
         ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
@@ -67,13 +59,7 @@ jobs:
         
         echo "Detected Trigger Time (UTC Hour: $HOUR) -> Period: $PERIOD_TAG"
         
-        # [修正] 移除 MarketRadar/ 前缀，直接运行根目录下的 main.py
-        if [ -f main.py ]; then
-          python main.py "$PERIOD_TAG"
-        elif [ -f MarketRadar/main.py ]; then
-          # 兼容备用：如果文件确实在子目录
-          python MarketRadar/main.py "$PERIOD_TAG"
-        else
-          echo "Error: main.py not found in root or MarketRadar/ folder."
-          exit 1
-        fi
+        # 运行主程序并传入时段标签
+        # 假设 main.py 位于 MarketRadar 目录下
+        # sys.path[0] 将指向 MarketRadar 目录，确保内部 import 正常
+        python MarketRadar/main.py "$PERIOD_TAG"
