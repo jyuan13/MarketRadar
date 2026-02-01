@@ -217,10 +217,12 @@ def parse_chinese_date(date_str):
     except:
         return pd.to_datetime(date_str, errors='coerce')
 
-def main():
+def main(period_tag=None):
     start_time = time.time()
     print_banner()
     print("🚀 MarketRadar 启动主程序 (Integrated Version)...")
+    if period_tag:
+        print(f"📅 当前运行时段: {period_tag}")
     
     all_status_logs = []
 
@@ -467,7 +469,13 @@ def main():
 
     if save_compact_json(final_data, OUTPUT_FILENAME):
         try:
-            email_subject = f"MarketRadar全量日报_{datetime.now(TZ_CN).strftime('%Y-%m-%d')}"
+            # [修改] 邮件标题逻辑: 如果有 period_tag，则追加到标题
+            base_subject = f"MarketRadar全量日报_{datetime.now(TZ_CN).strftime('%Y-%m-%d')}"
+            if period_tag:
+                email_subject = f"{base_subject} 【{period_tag}】"
+            else:
+                email_subject = base_subject
+                
             base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观, 汇率, K线(Stock/VNI/科创50/A股/银行), 信号扫描(MyTT)\n\n"
             
             email_body = generate_email_body_summary(cleaned_logs, signal_summary)
@@ -482,4 +490,9 @@ def main():
     print(f"\n✨ 任务完成，耗时: {time.time() - start_time:.2f} 秒")
 
 if __name__ == "__main__":
-    main()
+    # [修改] 解析命令行参数
+    arg_period = None
+    if len(sys.argv) > 1:
+        arg_period = sys.argv[1]
+    
+    main(period_tag=arg_period)

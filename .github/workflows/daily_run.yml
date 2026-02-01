@@ -1,39 +1,64 @@
-name: MarketRadar-Daily-Action
+name: MarketRadar Daily
 
 on:
   schedule:
-    # 示例：每天 UTC 时间 06:00 (北京时间 14:00) 运行
-    - cron: '0 6 * * *'
-  workflow_dispatch:      # 允许在 GitHub 界面手动点击按钮触发
+    # GitHub Actions 使用 UTC 时间
+    # UTC 00:00 -> 北京时间 08:00 (早间)
+    # UTC 06:00 -> 北京时间 14:00 (午间)
+    # UTC 08:00 -> 北京时间 16:00 (晚间/收盘)
+    - cron: '0 0,6,8 * * *'
+  workflow_dispatch:
 
 jobs:
   run-market-radar:
     runs-on: ubuntu-latest
-
+    
     steps:
-    # 1. 拉取代码
     - name: Checkout code
       uses: actions/checkout@v3
 
-    # 2. 设置 Python 环境
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.12'  # 推荐使用 3.12 或更高版本
+        python-version: '3.12'
 
-    # 3. 安装依赖
     - name: Install dependencies
       run: |
+        # 升级 pip 并安装依赖
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        if [ -f MarketRadar/requirements.txt ]; then pip install -r MarketRadar/requirements.txt; fi
+        # 确保安装核心库 (防止 requirements.txt 缺失)
+        pip install pandas numpy requests akshare yfinance lxml selenium webdriver-manager
 
-    # 4. 执行主程序 (Main)
-    - name: Execute MarketRadar Main
+    - name: Run MarketRadar
       env:
-        # 从 GitHub Secrets 中读取敏感信息并注入环境变量
+        # 配置环境变量 (需要在 GitHub Secrets 中设置)
         SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
         SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
         RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
         FMP_API_Key: ${{ secrets.FMP_API_Key }}  # 如果你使用了FMP数据源
+        ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
       run: |
-        python main.py
+        # 获取当前 UTC 小时
+        HOUR=$(date -u +%H)
+        # 去除可能的前导零 (例如 08 -> 8), 避免 shell 算术错误
+        HOUR=${HOUR#0}
+        
+        PERIOD_TAG="手动/测试触发"
+        
+        # 根据触发时间判断时段
+        # 容错匹配: 比较数字
+        if [ "$HOUR" -eq 0 ]; then
+          PERIOD_TAG="早间数据"
+        elif [ "$HOUR" -eq 6 ]; then
+          PERIOD_TAG="午间数据"
+        elif [ "$HOUR" -eq 8 ]; then
+          PERIOD_TAG="晚间数据"
+        fi
+        
+        echo "Detected Trigger Time (UTC Hour: $HOUR) -> Period: $PERIOD_TAG"
+        
+        # 运行主程序并传入时段标签
+        # 假设 main.py 位于 MarketRadar 目录下，且该目录是包的一部分或独立脚本
+        # 使用 python MarketRadar/main.py 运行，sys.path[0] 将指向 MarketRadar 目录，确保内部 import 正常
+        python MarketRadar/main.py "$PERIOD_TAG"
