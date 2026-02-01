@@ -9,18 +9,28 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from itertools import groupby
 
-# 动态添加路径以确保能导入同级模块
+# [修正] 路径处理逻辑优化：优先确保当前脚本所在目录在 sys.path 中
+# 这样无论 main.py 是在根目录还是子目录，都能找到同级的 fetch_data 等模块
 current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
 
-import fetch_data
-import MarketRadar
-import utils
-import scrape_economy_selenium
-# 引入 fetch_data_core 以直接调用新功能
-import fetch_data_core
+# 尝试引用模块，如果模块在上一级目录（针对某些特殊的本地开发环境），则尝试添加父目录
+try:
+    import fetch_data
+    import MarketRadar
+    import utils
+    import scrape_economy_selenium
+    import fetch_data_core
+except ImportError:
+    parent_dir = os.path.dirname(current_dir)
+    if parent_dir not in sys.path:
+        sys.path.append(parent_dir)
+    import fetch_data
+    import MarketRadar
+    import utils
+    import scrape_economy_selenium
+    import fetch_data_core
 
 OUTPUT_FILENAME = "MarketRadar_Report.json"
 LOG_FILENAME = "market_data_status.txt"
