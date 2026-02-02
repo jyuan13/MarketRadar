@@ -448,23 +448,58 @@ def fetch_star50_margin():
         return [], str(e)
 
 def fetch_star50_realtime_vol_ratio():
-    """获取科创50ETF实时量比 (Spot Data)"""
-    print("   -> 获取科创50ETF实时量比 (AKShare)...")
+    """
+    获取科创50ETF实时量比 (Spot Data)
+    [修复] 使用轻量级 API 替代 ak.fund_etf_spot_em() 以避免在 Github Action 中超时
+    """
+    print("   -> 获取科创50ETF实时量比 (Direct API)...")
     try:
-        df = ak.fund_etf_spot_em()
-        target = df[df['代码'] == '588000']
-        if target.empty:
-            return None, "Symbol 588000 not found in spot data"
+        # 使用东财直接接口查询单个标的 (secid=1.588000, 1=SH)
+        # f43=最新价, f50=量比, f57=代码, f58=名称
+        url = "http://push2.eastmoney.com/api/qt/stock/get"
+        params = {
+            "secid": "1.588000",
+            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            "fields": "f43,f50,f57,f58", 
+            "invt": "2",
+            "fltt": "2",
+            "_": str(int(time.time() * 1000))
+        }
         
-        row = target.iloc[0]
+        # 使用自定义 Header 避免被轻易屏蔽
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "http://quote.eastmoney.com/"
+        }
+        
+        r = requests.get(url, params=params, headers=headers, timeout=5)
+        data = r.json().get("data")
+        
+        if not data:
+             return None, "No data in response"
+             
+        # f50 是量比。通常 API 返回的是直观数值，例如 0.85 或 1.22
+        # 如果是 "-", 则无数据
+        vol_ratio = data.get("f50")
+        if str(vol_ratio) == "-": 
+            vol_ratio = None
+        else:
+            try:
+                vol_ratio = float(vol_ratio)
+                # 简单清洗: 某些接口偶尔返回放大100倍的值，但 Push2 接口通常是原值
+                # 这里假设是原值，如果 > 1000 可能异常，暂不做处理
+            except:
+                vol_ratio = None
+
         result = {
-            "代码": row['代码'],
-            "名称": row['名称'],
-            "最新价": row['最新价'],
-            "量比": row['量比'],
+            "代码": data.get("f57", "588000"),
+            "名称": data.get("f58", "科创50ETF"),
+            "最新价": data.get("f43"),
+            "量比": vol_ratio,
             "更新时间": datetime.datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')
         }
         return result, None
+        
     except Exception as e:
         print(f"科创50实时量比获取失败: {e}")
         return None, str(e)
@@ -577,33 +612,70 @@ def fetch_kcb50_60m():
     获取科创50 ETF (588000) 近5个交易日的 60分钟K线
     包含: Volume, Amount, Volume Ratio
     [修复] 增加对 None 返回值的检查，并尝试 ETF 专用接口
+    [增强] 当 AkShare 失败时，回退到 YFinance (588000.SS)
     """
-    print("   -> 获取科创50 (588000) 60分钟K线 (AKShare)...")
-    try:
-        df = None
-        # 1. 尝试股票分时接口 (通常兼容 ETF)
+    print("   -> 获取科创50 (588000) 60分钟K线 (AKShare/YFinance)...")
+    
+    df = None
+    
+    # 1. 尝试 AKShare (带重试)
+    # 常用接口容易 timeout, 尝试 2 次
+    for attempt in range(2):
         try:
+            # 尝试股票分时接口
             df = ak.stock_zh_a_hist_min_em(symbol="588000", period="60", adjust="qfq")
-        except:
-            pass
-            
-        # 2. 如果失败或为空，尝试 ETF 分时接口 (如有)
-        if df is None or df.empty:
-            if hasattr(ak, 'fund_etf_hist_min_em'):
-                try:
-                    df = ak.fund_etf_hist_min_em(symbol="588000", period="60", adjust="qfq")
-                except:
-                    pass
+            if df is not None and not df.empty:
+                break
+        except Exception as e:
+            if attempt == 0:
+                time.sleep(1) # 简短休眠重试
+            else:
+                pass
+                
+    if df is None or df.empty:
+        # 尝试 ETF 分时接口 (如有)
+        if hasattr(ak, 'fund_etf_hist_min_em'):
+            try:
+                df = ak.fund_etf_hist_min_em(symbol="588000", period="60", adjust="qfq")
+            except:
+                pass
+
+    # 2. 如果 AKShare 依然失败，回退到 YFinance
+    if df is None or df.empty:
+        print("   ⚠️ AKShare 获取科创50分时失败，切换至 YFinance (588000.SS)...")
+        try:
+            t = yf.Ticker("588000.SS")
+            hist = t.history(period="5d", interval="60m")
+            if not hist.empty:
+                hist = hist.reset_index()
+                # 转换列名: YF columns are Capitalized
+                hist.rename(columns={
+                    "Datetime": "date", "Open": "open", "High": "high", 
+                    "Low": "low", "Close": "close", "Volume": "volume"
+                }, inplace=True)
+                
+                # 处理时区 (YFinance 返回带时区)
+                if hist['date'].dt.tz is not None:
+                    hist['date'] = hist['date'].dt.tz_convert(TZ_CN).dt.tz_localize(None)
+                
+                # 估算 amount (成交额) = close * volume (近似)
+                hist['amount'] = hist['close'] * hist['volume']
+                
+                df = hist
+        except Exception as yf_e:
+            print(f"   ❌ YFinance 回退也失败: {yf_e}")
+
+    if df is None or df.empty:
+        return [], "Empty or None dataframe from all sources"
         
-        if df is None or df.empty:
-            return [], "Empty or None dataframe from AKShare"
-            
-        # 字段映射: "时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额", ...
-        # 注意: 这里的 "成交量" 单位可能是 手，"成交额" 是 元
-        df.rename(columns={
-            "时间": "date", "成交量": "volume", "成交额": "amount", 
-            "开盘": "open", "收盘": "close", "最高": "high", "最低": "low"
-        }, inplace=True)
+    try:
+        # 字段映射 (如果来自 AkShare)
+        # "时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额", ...
+        if "时间" in df.columns:
+            df.rename(columns={
+                "时间": "date", "成交量": "volume", "成交额": "amount", 
+                "开盘": "open", "收盘": "close", "最高": "high", "最低": "low"
+            }, inplace=True)
         
         df['date'] = pd.to_datetime(df['date'])
         df = df.sort_values('date')
@@ -630,7 +702,7 @@ def fetch_kcb50_60m():
         return result, None
 
     except Exception as e:
-        print(f"科创50 60mK线获取失败: {e}")
+        print(f"科创50 60mK线处理失败: {e}")
         return [], str(e)
 
 def fetch_hstech_60m():
