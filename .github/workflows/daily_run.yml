@@ -3,10 +3,10 @@ name: MarketRadar Daily
 on:
   schedule:
     # GitHub Actions 使用 UTC 时间
-    # UTC 00:00 -> 北京时间 08:00 (早间)
-    # UTC 06:00 -> 北京时间 14:00 (午间)
+    # UTC 22:00 -> 北京时间 06:00 (早间)
+    # UTC 05:00 -> 北京时间 13:00 (午间)
     # UTC 08:00 -> 北京时间 16:00 (晚间/收盘)
-    - cron: '0 0,6,8 * * *'
+    - cron: '0 22,5,8 * * *'
   workflow_dispatch:
 
 jobs:
