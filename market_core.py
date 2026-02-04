@@ -284,8 +284,7 @@ class MarketFetcher:
         
         symbol_map = {
             "纳斯达克": "^IXIC", "标普500": "^GSPC", 
-            "黄金(COMEX)": "GCUSD", "VNM(ETF)": "VNM",
-            "越南胡志明指数": "^VNINDEX"
+            "黄金(COMEX)": "GCUSD"
         }
         symbol = symbol_map.get(name)
         if not symbol: return pd.DataFrame()

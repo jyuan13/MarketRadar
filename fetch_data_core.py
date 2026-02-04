@@ -209,89 +209,7 @@ def fetch_japan_bond_yields():
         print(f"日本国债获取失败: {e}")
         return [], str(e)
 
-def fetch_vietnam_index_klines():
-    print("   -> 获取越南胡志明指数K线 (Investing.com)...")
-    url = "https://cn.investing.com/indices/vn-historical-data"
-    try:
-        r = SESSION.get(url, timeout=TIMEOUT)
-        r.raise_for_status()
-        
-        try:
-            dfs = pd.read_html(StringIO(r.text))
-        except ValueError as ve:
-             print(f"   [Debug] Read HTML failed. Response preview: {r.text[:200]}...")
-             return [], f"Read HTML failed: {ve}"
-
-        if not dfs:
-            return [], "No tables found in response"
-        
-        df = None
-        for i, temp_df in enumerate(dfs):
-            cols = [str(c).strip() for c in temp_df.columns]
-            if "日期" in cols and "收盘" in cols:
-                df = temp_df
-                break
-        
-        if df is None:
-            return [], "Table with columns '日期' and '收盘' not found"
-        
-        def parse_date(x):
-            try:
-                return datetime.datetime.strptime(str(x), "%Y年%m月%d日").strftime("%Y-%m-%d")
-            except:
-                return str(x)
-        
-        df["日期"] = df["日期"].apply(parse_date)
-        
-        cols_to_clean = ["收盘", "开盘", "高", "低"]
-        for col in cols_to_clean:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", ""), errors="coerce")
-        
-        def parse_volume(x):
-            if pd.isna(x) or x == '-':
-                return 0
-            s = str(x).upper()
-            multi = 1
-            if "M" in s:
-                multi = 1_000_000
-                s = s.replace("M", "")
-            elif "K" in s:
-                multi = 1_000
-                s = s.replace("K", "")
-            elif "B" in s:
-                multi = 1_000_000_000
-                s = s.replace("B", "")
-            try:
-                return float(s) * multi
-            except:
-                return 0
-        
-        if "交易量" in df.columns:
-            df["交易量"] = df["交易量"].apply(parse_volume)
-            
-        if "涨跌幅" in df.columns:
-            df["涨跌幅"] = pd.to_numeric(df["涨跌幅"].astype(str).str.replace("%", ""), errors="coerce")
-        
-        df = df.sort_values("日期", ascending=True)
-        
-        result = []
-        for _, row in df.iterrows():
-            result.append({
-                "date": row["日期"],
-                "open": row.get("开盘"),
-                "high": row.get("高"),
-                "low": row.get("低"),
-                "close": row.get("收盘"),
-                "volume": row.get("交易量"),
-                "change_pct": row.get("涨跌幅")
-            })
-            
-        return result, None
-
-    except Exception as e:
-        print(f"越南指数获取失败: {e}")
-        return [], str(e)
+# [Deleted] fetch_vietnam_index_klines() 函数已移除
 
 # ==============================================================================
 # AKShare 特定接口适配 (修复后)
@@ -564,7 +482,7 @@ def fetch_ashare_indices():
     return results, None
 
 # ==============================================================================
-# 新增: 60分钟K线 (科创50 & 恒生科技) & 银行数据
+# 新增: 60分钟K线 (科创50 & 恒生科技)
 # ==============================================================================
 
 def _calculate_hourly_volume_ratio(df):
@@ -758,81 +676,4 @@ def fetch_hstech_60m():
         print(f"恒生科技 60mK线获取失败: {e}")
         return [], str(e)
 
-def fetch_us_banks_daily():
-    """
-    获取六大银行的日线数据 (优先 Akshare stock_us_daily, 备选 yfinance)
-    JPM, BAC, C, WFC, GS, MS
-    """
-    print("   -> 获取六大银行日线数据...")
-    banks = [
-        {"name": "摩根大通", "symbol": "JPM"},
-        {"name": "美国银行", "symbol": "BAC"},
-        {"name": "花旗集团", "symbol": "C"},
-        {"name": "富国银行", "symbol": "WFC"},
-        {"name": "高盛集团", "symbol": "GS"},
-        {"name": "摩根士丹利", "symbol": "MS"},
-    ]
-    
-    results = []
-    end_date_str = datetime.datetime.now().strftime("%Y%m%d")
-    start_date_str = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y%m%d")
-    
-    for b in banks:
-        name = b["name"]
-        symbol = b["symbol"]
-        df = pd.DataFrame()
-        
-        # 1. Try AKShare
-        try:
-            # stock_us_daily 需要 adjust="qfq"
-            # 注意: AKShare 美股接口有时不稳定
-            df = ak.stock_us_daily(symbol=symbol, adjust="qfq")
-        except:
-            pass
-            
-        # 2. Try YFinance if AKShare failed or empty
-        if df.empty:
-            try:
-                yf_df = yf.download(symbol, period="1y", progress=False, auto_adjust=False)
-                if not yf_df.empty:
-                    yf_df = yf_df.reset_index()
-                    # Standardize columns
-                    yf_df.rename(columns={"Date": "date", "Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
-                    # Handle MultiIndex columns if present
-                    if isinstance(yf_df.columns, pd.MultiIndex):
-                        yf_df.columns = yf_df.columns.droplevel(1)
-                        # Re-rename after drop level if needed, but usually simple download is fine or flattened
-                        # Let's map safely
-                        pass 
-                    
-                    # Ensure lower case columns
-                    yf_df.columns = [c.lower() for c in yf_df.columns]
-                    df = yf_df
-            except:
-                pass
-        
-        if not df.empty:
-            # 统一格式
-            df.columns = [c.lower() for c in df.columns]
-            if 'date' not in df.columns and '日期' in df.columns:
-                df.rename(columns={'日期': 'date'}, inplace=True)
-            
-            # AKShare col map
-            rename_map = {'开盘': 'open', '收盘': 'close', '最高': 'high', '最低': 'low', '成交量': 'volume'}
-            df.rename(columns=rename_map, inplace=True)
-            
-            if 'date' in df.columns:
-                df['date'] = pd.to_datetime(df['date'])
-                df = df.sort_values('date')
-                df['name'] = name
-                
-                # 必须包含 close, open, high, low
-                if 'close' in df.columns:
-                    results.append(df)
-                    print(f"      OK: {name}")
-                else:
-                    print(f"      Skip: {name} (Missing columns)")
-        else:
-            print(f"      Fail: {name}")
-            
-    return results
+# [Deleted] fetch_us_banks_daily() 函数已移除

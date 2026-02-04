@@ -47,7 +47,6 @@ TARGETS_INDICES = {
     "标普500":      {"ak": ".INX",    "yf": "^GSPC",    "type": "index_us"},
     "恒生科技":     {"ak": "HSTECH",  "yf": "^HSTECH",  "type": "index_hk"},
     "恒生指数":     {"ak": "HSI",     "yf": "^HSI",     "type": "index_hk"},
-    "VNM(ETF)":     {"ak": "VNM",     "yf": "VNM",      "type": "stock_us"},
     # [新增] 美股生物科技 ETF (XBI)
     "XBI(ETF)":     {"ak": "XBI",     "yf": "XBI",      "type": "stock_us"},
 }
@@ -90,18 +89,7 @@ TARGETS_HSTECH_TOP20 = {
     "同程旅行":     {"ak": "00780", "yf": "0780.HK", "type": "stock_hk"},
 }
 
-TARGETS_VIETNAM_TOP10 = {
-    "越南繁荣银行(VPB)":    {"ak": None, "yf": "VPB.VN", "type": "stock_vn"},
-    "军队商业银行(MBB)":    {"ak": None, "yf": "MBB.VN", "type": "stock_vn"},
-    "和发集团(HPG)":        {"ak": None, "yf": "HPG.VN", "type": "stock_vn"},
-    "移动世界(MWG)":        {"ak": None, "yf": "MWG.VN", "type": "stock_vn"},
-    "FPT公司(FPT)":         {"ak": None, "yf": "FPT.VN", "type": "stock_vn"},
-    "西贡商信(STB)":        {"ak": None, "yf": "STB.VN", "type": "stock_vn"},
-    "胡志明发展银行(HDB)":  {"ak": None, "yf": "HDB.VN", "type": "stock_vn"},
-    "科技商业银行(TCB)":    {"ak": None, "yf": "TCB.VN", "type": "stock_vn"},
-    "Vingroup(VIC)":       {"ak": None, "yf": "VIC.VN", "type": "stock_vn"},
-    "Vinhomes(VHM)":       {"ak": None, "yf": "VHM.VN", "type": "stock_vn"},
-}
+# [Deleted] TARGETS_VIETNAM_TOP10 越南Top10持股配置已移除
 
 TARGETS_US_MAG7 = {
     "苹果(AAPL)":    {"ak": None, "yf": "AAPL",  "type": "stock_us"},
@@ -203,11 +191,7 @@ def get_all_kline_data():
     all_data_collection["ma_data"]["general"].extend(ma_hstech)
     all_status_logs.extend(logs_hstech)
     
-    # 3. 抓取新兴市场
-    data_vn, ma_vn, logs_vn = market_core.fetch_group_data(fetcher, TARGETS_VIETNAM_TOP10, "新兴市场", REPORT_START_DATE, END_DATE)
-    all_data_collection["data"]["新兴市场"] = data_vn
-    all_data_collection["ma_data"]["general"].extend(ma_vn)
-    all_status_logs.extend(logs_vn)
+    # [Deleted] 新兴市场(TARGETS_VIETNAM_TOP10)抓取逻辑已移除
     
     # 4. 抓取美股七巨头 + 扩充
     new_group_name = "美股七巨头+台积电&博通&美光"

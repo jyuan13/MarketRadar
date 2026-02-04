@@ -306,39 +306,7 @@ def main(period_tag=None):
         except Exception as e_ma:
              print(f"⚠️ {hshci_key} 均线计算或切片失败: {e_ma}")
 
-    # [Step 4/4] 获取越南胡志明指数 (Investing.com)...
-    print("\n[Step 4/4] 获取越南胡志明指数 (Investing.com)...")
-    try:
-        vni_data, vni_err = fetch_data.fetch_vietnam_index_klines()
-        if vni_data:
-            if "data" not in kline_data_dict or kline_data_dict["data"] is None:
-                kline_data_dict["data"] = {}
-                
-            kline_data_dict["data"]["越南胡志明指数"] = vni_data
-            
-            try:
-                df_vni = pd.DataFrame(vni_data)
-                df_vni['name'] = "越南胡志明指数"
-                
-                vni_ma_list = utils.calculate_ma(df_vni)
-                if vni_ma_list:
-                    ma_data_dict["general"].extend(vni_ma_list)
-                    print(f"✅ 越南胡志明指数获取成功 ({len(vni_data)} 条记录) & 均线已计算")
-                else:
-                    print(f"✅ 越南胡志明指数获取成功 ({len(vni_data)} 条记录) (均线计算无结果)")
-                
-                all_status_logs.append({'name': '越南胡志明指数', 'status': True, 'error': None})
-                
-            except Exception as e_ma:
-                print(f"⚠️ 越南数据获取成功但均线计算失败: {e_ma}")
-                all_status_logs.append({'name': '越南胡志明指数', 'status': True, 'error': f"MA Error: {e_ma}"})
-            
-        else:
-            all_status_logs.append({'name': '越南胡志明指数', 'status': False, 'error': vni_err})
-            print(f"❌ 越南胡志明指数获取失败: {vni_err}")
-    except Exception as e:
-        print(f"❌ 越南指数模块异常: {e}")
-        all_status_logs.append({'name': 'vni_module', 'status': False, 'error': str(e)})
+    # [Deleted] Step 4/4 越南胡志明指数获取逻辑已移除
 
     # [Step 4.5] 处理 A股指数 (新增逻辑)
     # 从 combined_macro 中提取，并计算均线
@@ -423,30 +391,7 @@ def main(period_tag=None):
         if "hk" not in combined_macro: combined_macro["hk"] = {}
         combined_macro["hk"]["恒生科技指数_60m"] = []
 
-    # [Step 4.7] 获取六大银行 K线与均线
-    print("\n[Step 4.7] 获取六大银行日线数据...")
-    try:
-        bank_dfs = fetch_data_core.fetch_us_banks_daily()
-        for df in bank_dfs:
-            name = df['name'].iloc[0]
-            # 计算均线
-            ma_res = utils.calculate_ma(df)
-            if ma_res:
-                ma_data_dict["general"].extend(ma_res)
-            
-            # 存储 K线 (切片)
-            cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=REPORT_DAYS)
-            df_slice = df[df['date'] >= cutoff_date].copy()
-            df_slice['date'] = df_slice['date'].dt.strftime('%Y-%m-%d')
-            
-            if "data" not in kline_data_dict: kline_data_dict["data"] = {}
-            kline_data_dict["data"][name] = df_slice.to_dict(orient='records')
-            
-            all_status_logs.append({'name': f"Bank_{name}", 'status': True, 'error': None})
-            
-    except Exception as e:
-        print(f"⚠️ 六大银行数据获取异常: {e}")
-        all_status_logs.append({'name': 'US_Banks', 'status': False, 'error': str(e)})
+    # [Deleted] Step 4.7 六大银行获取逻辑已移除
 
     print("\n[Step 5] 整合数据并清洗...")
     # 传入 kcb50_dict
@@ -477,7 +422,7 @@ def main(period_tag=None):
             else:
                 email_subject = base_subject
                 
-            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观, 汇率, K线(Stock/VNI/科创50/A股/银行), 信号扫描(MyTT)\n\n"
+            base_body = f"生成时间: {datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')}\n包含: 宏观, 汇率, K线(Stock/科创50/A股), 信号扫描(MyTT)\n\n"
             
             email_body = generate_email_body_summary(cleaned_logs, signal_summary)
             email_body = base_body + email_body

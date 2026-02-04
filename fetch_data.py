@@ -31,7 +31,6 @@ def get_market_fx_and_bonds():
         {"name": "VIX恐慌指数", "ticker": "^VIX", "days": 15},
         {"name": "美元/人民币", "ticker": "CNY=X", "days": 15},
         {"name": "美元/日元", "ticker": "JPY=X", "days": 15},
-        {"name": "美元/越南盾", "ticker": "VND=X", "days": 15},
         {"name": "美元指数", "ticker": "DX=F", "days": 10} 
     ]
 
@@ -124,11 +123,8 @@ def get_market_fx_and_bonds():
 
     return data_store, status_logs
 
-# 重新暴露 fetch_vietnam_index_klines 供 main.py 调用
-def fetch_vietnam_index_klines():
-    return fetch_data_core.fetch_vietnam_index_klines()
+# [Deleted] fetch_vietnam_index_klines() 函数包装已移除
 
 if __name__ == "__main__":
     data, logs = get_market_fx_and_bonds()
-    vn_data, vn_err = fetch_vietnam_index_klines()
-    print("VNI Data (Top 2):", vn_data[:2] if vn_data else vn_err)
+    print("Fetch completed.")
