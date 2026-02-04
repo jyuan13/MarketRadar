@@ -49,9 +49,9 @@ jobs:
         PERIOD_TAG="手动/测试触发"
         
         # 根据触发时间判断时段 (UTC时间)
-        if [ "$HOUR" -eq 0 ]; then
+        if [ "$HOUR" -eq 22 ]; then
           PERIOD_TAG="早间数据"
-        elif [ "$HOUR" -eq 6 ]; then
+        elif [ "$HOUR" -eq 5 ]; then
           PERIOD_TAG="午间数据"
         elif [ "$HOUR" -eq 8 ]; then
           PERIOD_TAG="晚间数据"
