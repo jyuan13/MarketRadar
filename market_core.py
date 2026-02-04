@@ -7,6 +7,7 @@ import random
 import time
 import socket
 import numpy as np # MyTT 需要 numpy
+import threading  # 用于yfinance线程锁
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
 import utils
@@ -22,6 +23,9 @@ except ImportError:
     except ImportError:
         MyTT = None
         print("⚠️ Warning: MyTT.py not found. Technical indicators will be skipped.")
+
+# [v3.5] yfinance 线程锁 - 防止并发下载时的数据竞争问题
+_yfinance_lock = threading.Lock()
 
 # === 邮件相关库 ===
 import smtplib
@@ -259,13 +263,16 @@ class MarketFetcher:
             print(f"   ⚡ [YFinance] 请求: {symbol}{retry_msg} ...", end="", flush=True)
             
             try:
-                df = yf.download(symbol, start=self.fetch_start_date, end=self.end_date, progress=False, auto_adjust=False)
+                # [v3.5] 使用线程锁防止并发数据竞争
+                with _yfinance_lock:
+                    df = yf.download(symbol, start=self.fetch_start_date, end=self.end_date, progress=False, auto_adjust=False)
+                
                 if not df.empty:
                     df = df.reset_index()
                     if isinstance(df.columns, pd.MultiIndex):
                         df.columns = df.columns.droplevel(1)
                     print(" ✅")
-                    return df
+                    return df.copy()  # [v3.5] 返回副本防止引用问题
                 else:
                     print(" ❌ (空数据)")
                     return pd.DataFrame()
