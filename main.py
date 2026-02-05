@@ -369,7 +369,9 @@ def main(period_tag=None):
         
     # 2. 迁移原 China 下的科创50字段
     china_data = combined_macro.get("china", {})
-    keys_to_move = ["科创50实时快照", "科创50融资融券", "科创50估值"]
+    # [修改] 新增科创50历史分析到迁移列表
+    # History: v1.0 2026-02-05 新增历史分析字段
+    keys_to_move = ["科创50实时快照", "科创50融资融券", "科创50估值", "科创50历史分析"]
     for k in keys_to_move:
         if k in china_data:
             kcb50_dict[k] = china_data.pop(k) # Move data

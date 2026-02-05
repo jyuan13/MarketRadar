@@ -677,3 +677,116 @@ def fetch_hstech_60m():
         return [], str(e)
 
 # [Deleted] fetch_us_banks_daily() 函数已移除
+
+# ==============================================================================
+# 新增: 历史价格极值分析 (ATH/ATL, 3年/5年极值, 历史百分位)
+# History: v1.0 2026-02-05 新增历史极值分析功能
+# ==============================================================================
+
+def fetch_historical_extremes(symbol="588000", name="科创50ETF", asset_type="etf_zh"):
+    """
+    获取资产的历史价格极值分析数据
+    包含: ATH/ATL (上市以来最高/最低) 及日期, 3年/5年极值, 历史百分位
+    
+    :param symbol: 资产代码 (默认: 588000 科创50ETF)
+    :param name: 资产名称
+    :param asset_type: 资产类型
+    :return: (data_dict, error_msg)
+    """
+    print(f"   -> 获取 {name} 历史极值数据...")
+    
+    try:
+        df = None
+        
+        # 根据资产类型选择获取方式
+        if asset_type == "etf_zh":
+            # ETF 使用 fund_etf_hist_em，获取全部历史数据
+            # 注意: 需要传足够早的 start_date 来获取上市以来全部数据
+            df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date="20190101", end_date=datetime.datetime.now().strftime("%Y%m%d"), adjust="qfq")
+        elif asset_type == "stock_zh_a":
+            # A股使用 stock_zh_a_hist
+            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date="20100101", end_date=datetime.datetime.now().strftime("%Y%m%d"), adjust="qfq")
+        
+        # 回退到 yfinance
+        if df is None or df.empty:
+            print(f"   ⚠️ AKShare 获取失败，切换至 YFinance...")
+            yf_symbol = f"{symbol}.SS" if symbol.startswith("6") or symbol.startswith("5") else f"{symbol}.SZ"
+            t = yf.Ticker(yf_symbol)
+            hist = t.history(period="max")
+            if not hist.empty:
+                hist = hist.reset_index()
+                hist.rename(columns={"Date": "日期", "Close": "收盘", "High": "最高", "Low": "最低"}, inplace=True)
+                df = hist
+        
+        if df is None or df.empty:
+            return None, "All data sources returned empty"
+        
+        # 统一列名
+        col_map = {"日期": "date", "收盘": "close", "最高": "high", "最低": "low"}
+        for cn, en in col_map.items():
+            if cn in df.columns and en not in df.columns:
+                df.rename(columns={cn: en}, inplace=True)
+        
+        # 确保数值类型
+        df['close'] = pd.to_numeric(df['close'], errors='coerce')
+        df['high'] = pd.to_numeric(df['high'], errors='coerce')
+        df['low'] = pd.to_numeric(df['low'], errors='coerce')
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.dropna(subset=['close', 'high', 'low'])
+        df = df.sort_values('date')
+        
+        if df.empty:
+            return None, "No valid data after cleaning"
+        
+        # 获取当前价格 (最新收盘价)
+        current_price = df['close'].iloc[-1]
+        
+        # === 计算上市以来极值 (ATH/ATL) ===
+        ath_idx = df['high'].idxmax()
+        atl_idx = df['low'].idxmin()
+        ath = df.loc[ath_idx, 'high']
+        ath_date = df.loc[ath_idx, 'date'].strftime('%Y-%m-%d')
+        atl = df.loc[atl_idx, 'low']
+        atl_date = df.loc[atl_idx, 'date'].strftime('%Y-%m-%d')
+        
+        # === 计算近N年极值 ===
+        now = datetime.datetime.now()
+        
+        def get_period_extremes(years):
+            cutoff = now - datetime.timedelta(days=years * 365)
+            df_period = df[df['date'] >= cutoff]
+            if df_period.empty:
+                return None, None
+            return df_period['high'].max(), df_period['low'].min()
+        
+        high_3y, low_3y = get_period_extremes(3)
+        high_5y, low_5y = get_period_extremes(5)
+        
+        # === 计算历史百分位 ===
+        # 公式: (当前价 - ATL) / (ATH - ATL) * 100
+        if ath != atl:
+            percentile = (current_price - atl) / (ath - atl) * 100
+        else:
+            percentile = 50.0  # 避免除零
+        
+        result = {
+            "名称": name,
+            "当前价": round(float(current_price), 3),
+            "ATH": round(float(ath), 3),
+            "ATH日期": ath_date,
+            "ATL": round(float(atl), 3),
+            "ATL日期": atl_date,
+            "3年最高": round(float(high_3y), 3) if high_3y else None,
+            "3年最低": round(float(low_3y), 3) if low_3y else None,
+            "5年最高": round(float(high_5y), 3) if high_5y else None,
+            "5年最低": round(float(low_5y), 3) if low_5y else None,
+            "历史百分位": round(float(percentile), 2),
+            "更新时间": datetime.datetime.now(TZ_CN).strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        print(f"   ✅ {name} 历史分析完成: ATH={ath:.3f} ({ath_date}), ATL={atl:.3f} ({atl_date}), 百分位={percentile:.2f}%")
+        return result, None
+        
+    except Exception as e:
+        print(f"   ❌ {name} 历史极值获取失败: {e}")
+        return None, str(e)

@@ -121,6 +121,16 @@ def get_market_fx_and_bonds():
         status_logs.append({'name': "A股主要指数", 'status': False, 'error': ashare_err})
         print(f"   [A股指数] Failed: {ashare_err}")
 
+    # [新增] 科创50历史极值分析 (ATH/ATL, 3/5年极值, 历史百分位)
+    # History: v1.0 2026-02-05 新增
+    hist_data, hist_err = fetch_data_core.fetch_historical_extremes(symbol="588000", name="科创50ETF", asset_type="etf_zh")
+    if hist_data:
+        data_store["china"]["科创50历史分析"] = [hist_data]
+        status_logs.append({'name': "科创50历史分析", 'status': True, 'error': None})
+    else:
+        data_store["china"]["科创50历史分析"] = []
+        status_logs.append({'name': "科创50历史分析", 'status': False, 'error': hist_err})
+
     return data_store, status_logs
 
 # [Deleted] fetch_vietnam_index_klines() 函数包装已移除
