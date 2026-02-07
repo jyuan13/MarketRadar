@@ -40,4 +40,4 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}
       run: |
         # Run the connector script directly to test Auth
-        python Ref/Bace_Project/MarketRadar-Original/feishu_connector.py
+        python feishu_connector.py
