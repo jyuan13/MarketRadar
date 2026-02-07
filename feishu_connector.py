@@ -296,15 +296,27 @@ class FeishuDataWriter:
                 "US_STOCK_TECH": "美股七巨头-技术指标分析",
                 
                 "HK_INDEX_TRANS_30D": "恒生指数-近30天成交数据",
+                "HK_INDEX_MA": "恒生指数-日均线分析",
+                "HK_INDEX_TECH": "恒生指数-技术指标分析",
+
                 "HK_STOCK_TRANS_30D": "恒生科技-个股近30天成交数据",
+                "HK_STOCK_MA": "恒生科技-个股日均线",
+                "HK_STOCK_TECH": "恒生科技-个股技术指标",
                 
                 "STAR50_STOCK_TRANS_30D": "科创50-个股近30天成交数据",
                 "STAR50_INDEX_TRANS_30D": "科创50-指数近30天成交数据",
                 "STAR50_STOCK_MA": "科创50-个股日均线",
                 "STAR50_INDEX_MA": "科创50-指数日均线",
                 "STAR50_INDEX_TECH": "科创50-指数技术分析",
+                "STAR50_STOCK_TECH": "科创50-个股技术指标",
                 "STAR50_MARGIN": "科创50-融资融券",
                 "STAR50_VALUATION": "科创50-估值数据",
+
+                "DRUG_STOCK_TRANS_30D": "港股创新药-近30天成交数据",
+                "DRUG_INDEX_MA": "港股创新药-指数日均线",
+                "DRUG_STOCK_MA": "港股创新药-个股日均线",
+                "DRUG_INDEX_TECH": "港股创新药-指数技术指标",
+                "DRUG_STOCK_TECH": "港股创新药-个股技术指标",
                 
                 "VNM_INDEX_TRANS": "越南指数-历史数据",
                 "VNM_STOCK_TRANS": "越南个股-历史数据"
