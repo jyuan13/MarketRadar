@@ -190,27 +190,26 @@ def _dispatch_tech_list(writer, ma_list):
             writer.write_data(key, data, clear_existing=True)
 
 
-def _dispatch_transaction_group(writer, group_name, stocks_dict):
+def _dispatch_transaction_group(writer, group_name, group_data_list):
     """
     Routes 'market_klines' groups to Transaction Tables (TRANS_30D).
+    Input `group_data_list` is a flat list of records: [{name:..., date:..., close:...}, ...]
     """
-    # Flatten stocks_dict values into a single list
-    # Because Feishu Table expects a list of records, potentially mixed names
-    # But usually we send per-table.
-    
-    # 1. Identify Target Table Key based on Group Name
-    target_key = None
-    
+    if not isinstance(group_data_list, list):
+        logger.warning(f"⚠️ expected list for group {group_name}, got {type(group_data_list)}")
+        return
+
     if group_name == "指数":
         # Mixed Group: US Indices, HK Indices. Need split?
         # Yes, US_INDEX_TRANS_30D vs HK_INDEX_TRANS_30D
-        _split_and_sync_indices(writer, stocks_dict)
+        _split_and_sync_indices(writer, group_data_list)
         return
         
-    elif group_name == "大宗商品":
+    target_key = None
+    if group_name == "大宗商品":
         target_key = "GOLD_TRANS_30D"
     elif group_name == "恒生科技":
-        target_key = "HK_STOCK_TRANS_30D" # Mostly stocks
+        target_key = "HK_STOCK_TRANS_30D" # Mostly stocks in this group list (Top20)
     elif group_name == "美股七巨头+台积电&博通&美光":
         target_key = "US_STOCK_TRANS_30D"
     elif group_name == "港股创新药":
@@ -221,29 +220,20 @@ def _dispatch_transaction_group(writer, group_name, stocks_dict):
         target_key = "STAR50_STOCK_TRANS_30D"
         
     if target_key:
-        # Flatten
-        all_records = []
-        for name, records in stocks_dict.items():
-            if not records: continue
-            # Inject Name into record if missing (it usually is in records list, but verify)
-            for r in records:
-                r["name"] = name
-            all_records.extend(records)
-            
-        writer.write_data(target_key, all_records, clear_existing=True)
+        # group_data_list is already the list of records we need
+        writer.write_data(target_key, group_data_list, clear_existing=True)
 
 
-def _split_and_sync_indices(writer, stocks_dict):
+def _split_and_sync_indices(writer, records_list):
     us_records = []
     hk_records = []
     
-    for name, records in stocks_dict.items():
-        for r in records: r["name"] = name
-        
+    for r in records_list:
+        name = r.get("name", "")
         if name in ["纳斯达克", "标普500", "VNM(ETF)"]:
-            us_records.extend(records)
+            us_records.append(r)
         else:
-            hk_records.extend(records)
+            hk_records.append(r)
             
     writer.write_data("US_INDEX_TRANS_30D", us_records, clear_existing=True)
     writer.write_data("HK_INDEX_TRANS_30D", hk_records, clear_existing=True)
