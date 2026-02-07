@@ -245,10 +245,16 @@ class MarketFetcher:
                     print(" ❌ (空数据)")
                     return pd.DataFrame()
 
-            except Exception as e:
-                print(f" ❌ (Err: {str(e)[:15]})")
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, socket.timeout) as e:
+                print(f" ⚠️ [Network] {retry_msg} Timeout/Connection Error: {e}")
                 if i < max_retries - 1:
-                    time.sleep(5) # [Modified] Increase wait time to 5s
+                    wait_time = (i + 1) * 5 + random.uniform(1, 5) # Exponential backoff: 6s, 11s, 16s...
+                    time.sleep(wait_time) 
+                continue
+            except Exception as e:
+                print(f" ❌ (Err: {str(e)[:50]})") # Show a bit more error detail
+                if i < max_retries - 1:
+                    time.sleep(5)
                 continue
         
         print(" ❌ (AkShare多次重试失败, 放弃)")

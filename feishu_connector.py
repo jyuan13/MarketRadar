@@ -404,3 +404,12 @@ class FeishuDataWriter:
             batch = records[i : i + batch_size]
             self.client._request("POST", f"tables/{table_id}/records/batch_create", json_data={"records": batch})
             log_info(f"    📥 Inserted batch {i//batch_size + 1}")
+
+if __name__ == "__main__":
+    print(">>> Testing FeishuConnector Standalone <<<")
+    writer = FeishuDataWriter()
+    token = writer.client._get_tenant_access_token()
+    if token:
+        print(f"✅ Auth Success! Token: {token[:10]}...")
+    else:
+        print("❌ Auth Failed in Main Check!")
