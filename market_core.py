@@ -317,7 +317,8 @@ class MarketFetcher:
 
     def get_kline_data(self, name, config):
         print(f"正在获取 K线 [{name}] ...")
-        time.sleep(random.uniform(1.0, 3.0))
+        # Increase delay to avoid "RemoteDisconnected"
+        time.sleep(random.uniform(3.0, 5.0))
         
         df = pd.DataFrame()
         if config.get("ak"):
@@ -384,8 +385,9 @@ def fetch_group_data(fetcher, targets, group_name, report_start_date, end_date):
             print(f"❌ 任务 {name} 异常: {e}")
             return None, None, {'name': name, 'status': False, 'error': str(e)}
 
-    # [Modified] Reduce max_workers from 4 to 2 to prevent connection bans
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    # [Modified] Reduce max_workers to 1 (Sequential) to prevent AkShare Connection Error
+    # AkShare/Sina interfaces are very sensitive to concurrency from same IP.
+    with ThreadPoolExecutor(max_workers=1) as executor:
         future_to_name = {executor.submit(fetch_task, name, config): name for name, config in targets.items()}
         
         for future in as_completed(future_to_name):
