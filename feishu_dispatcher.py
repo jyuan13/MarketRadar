@@ -5,6 +5,8 @@ Routes MarketRadar-Original data structure to Feishu Tables.
 """
 import logging
 from feishu_connector import FeishuDataWriter
+# [New] Import Auto-Reset
+from reset_financial_tables import reset_all_financial_tables_auto
 
 # logger = logging.getLogger("FeishuDispatcher")
 
@@ -12,6 +14,12 @@ def sync_data(final_data):
     """
     Main entry point to sync the 'final_data' dict from main.py to Feishu.
     """
+    # [Step 0] Auto-Clean before Sync
+    try:
+        reset_all_financial_tables_auto()
+    except Exception as e:
+        print(f"❌ Auto-Reset Failed: {e}")
+
     print("⚡ Starting Feishu Sync Dispatch... (Debug Mode)")
     writer = FeishuDataWriter()
     

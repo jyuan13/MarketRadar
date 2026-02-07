@@ -1,0 +1,43 @@
+name: Debug Feishu Sync
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-sync:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests pandas python-dotenv
+
+    - name: Debug Env Vars
+      env:
+        FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+        FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+      run: |
+        echo "Checking Secrets availability..."
+        if [ -z "$FEISHU_APP_ID" ]; then
+          echo "❌ FEISHU_APP_ID is EMPTY or MISSING in Shell!"
+        else
+          echo "✅ FEISHU_APP_ID is set (Length: ${#FEISHU_APP_ID})"
+        fi
+
+    - name: Run MarketRadar (Debug)
+      env:
+        FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+        FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+        FEISHU_BITTABLE_APP_TOKEN: ${{ secrets.FEISHU_BITTABLE_APP_TOKEN }}
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        # Run the connector script directly to test Auth
+        python Ref/Bace_Project/MarketRadar-Original/feishu_connector.py

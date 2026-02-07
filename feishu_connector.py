@@ -268,18 +268,66 @@ class FeishuDataWriter:
             records = self._get_all_records(TABLE_ID_STATUS)
             target_record_id = None
             
+            # Define Status Name Map (English Key -> Chinese Name)
+            STATUS_NAME_MAP = {
+                "CN_MACRO_PMI": "中国-PMI数据",
+                "CN_MACRO_CPI": "中国-CPI数据",
+                "CN_MACRO_PPI": "中国-PPI数据",
+                "CN_MACRO_MONEY": "中国-社融与M2",
+                "CN_MACRO_YIELD": "中国-国债收益率",
+                "CN_MACRO_LPR": "中国-LPR利率",
+                "CN_MACRO_FLOWS": "中国-南向资金",
+                
+                "US_MACRO_CPI": "美国-CPI数据",
+                "US_MACRO_YIELD": "美国-国债收益率",
+                "US_MACRO_RRP": "美国-流动性(RRP/TGA)",
+                "JP_MACRO_YIELD": "日本-国债收益率",
+
+                "GOLD_TRANS_30D": "黄金-近30天成交数据",
+                "GOLD_MA": "黄金-日均线分析",
+                "GOLD_TECH": "黄金-技术指标分析",
+
+                "US_INDEX_TRANS_30D": "美股指数-近30天成交数据",
+                "US_INDEX_MA": "美股指数-日均线分析",
+                "US_INDEX_TECH": "美股指数-技术指标分析",
+
+                "US_STOCK_TRANS_30D": "美股七巨头-近30天成交数据",
+                "US_STOCK_MA": "美股七巨头-日均线分析",
+                "US_STOCK_TECH": "美股七巨头-技术指标分析",
+                
+                "HK_INDEX_TRANS_30D": "恒生指数-近30天成交数据",
+                "HK_STOCK_TRANS_30D": "恒生科技-个股近30天成交数据",
+                
+                "STAR50_STOCK_TRANS_30D": "科创50-个股近30天成交数据",
+                "STAR50_INDEX_TRANS_30D": "科创50-指数近30天成交数据",
+                "STAR50_STOCK_MA": "科创50-个股日均线",
+                "STAR50_INDEX_MA": "科创50-指数日均线",
+                "STAR50_INDEX_TECH": "科创50-指数技术分析",
+                "STAR50_MARGIN": "科创50-融资融券",
+                "STAR50_VALUATION": "科创50-估值数据",
+                
+                "VNM_INDEX_TRANS": "越南指数-历史数据",
+                "VNM_STOCK_TRANS": "越南个股-历史数据"
+            }
+            
+            # Translate Key Name if exists in map
+            display_name = STATUS_NAME_MAP.get(key_name, key_name)
+
             for r in records:
                 fields = r.get("fields", {})
-                if fields.get("任务名称") == key_name:
+                # Check both Raw Key and Display Name to catch duplicates
+                r_name = fields.get("任务名称")
+                if r_name == display_name or r_name == key_name:
                     target_record_id = r["record_id"]
                     break
             
-            ts_now = int(time.time() * 1000)
+            # Format time as string "YYYY-MM-DD HH:MM:SS"
+            time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             fields_payload = {
-                "任务名称": key_name,
+                "任务名称": display_name, # Use Translated Name
                 "状态": status,
-                "更新时间": ts_now,
-                "或者": str(count) # Assuming checks mapping text, wait. Let's stick to simple
+                "更新时间": time_str, # Changed from int timestamp to string
+                "或者": str(count)
             }
             # Note: Fields must match Status Table Schema exactly.
             # Based on user description: "状态数据表日期和状态是对的"
@@ -307,11 +355,20 @@ class FeishuDataWriter:
                      # Check update time is within last 1 minute
                      upd_time = fields.get("更新时间")
                      if upd_time:
-                         # timestamp ms
-                         if abs(time.time() * 1000 - upd_time) < 60000:
+                         # Handle both int (legacy) and string
+                         ts_val = 0
+                         if isinstance(upd_time, (int, float)):
+                             ts_val = upd_time
+                         elif isinstance(upd_time, str):
+                             try:
+                                 dt = datetime.datetime.strptime(upd_time, "%Y-%m-%d %H:%M:%S")
+                                 ts_val = dt.timestamp() * 1000
+                             except: pass
+                         
+                         if abs(time.time() * 1000 - ts_val) < 60000:
                              return True
                          else:
-                             log_error(f"Status Verify: Timestamp stale for {key_name}")
+                             log_error(f"Status Verify: Timestamp stale for {key_name} ({upd_time})")
                              return False
                      return True # Found but no time field? 
             log_error(f"Status Verify: Record not found for {key_name}")
