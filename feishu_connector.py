@@ -109,7 +109,8 @@ class FeiShuClient:
         self.app_id = os.environ.get("FEISHU_APP_ID")
         self.app_secret = os.environ.get("FEISHU_APP_SECRET")
         self.base_url = "https://open.feishu.cn/open-apis/bitable/v1/apps"
-        self.app_token = "NAlvbV3VKaWJ7Fs737ucIDMxnqf" # Hardcoded App Token based on project context
+        # Correct Token from libs/settings.py
+        self.app_token = "Dvk6bQOuqaArI9sYJzBcrzyonjg" 
         self.tenant_access_token = ""
         self.token_expire_time = 0
         
