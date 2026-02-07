@@ -108,6 +108,14 @@ class FeiShuClient:
     def __init__(self):
         self.app_id = os.environ.get("FEISHU_APP_ID")
         self.app_secret = os.environ.get("FEISHU_APP_SECRET")
+        
+        # [Debug] Print Auth Status
+        has_id = "YES" if self.app_id else "NO"
+        has_secret = "YES" if self.app_secret else "NO"
+        print(f"[FeishuConnector] Init check: Has AppID? {has_id}, Has Secret? {has_secret}")
+        if self.app_id:
+            print(f"[FeishuConnector] AppID Prefix: {self.app_id[:4]}***")
+            
         self.base_url = "https://open.feishu.cn/open-apis/bitable/v1/apps"
         # Correct Token from libs/settings.py
         self.app_token = "Dvk6bQOuqaArI9sYJzBcrzyonjg" 

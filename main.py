@@ -8,6 +8,10 @@ import numpy as np
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from itertools import groupby
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # 动态添加路径以确保能导入同级模块
 current_dir = os.path.dirname(os.path.abspath(__file__))

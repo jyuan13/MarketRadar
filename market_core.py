@@ -248,7 +248,7 @@ class MarketFetcher:
             except Exception as e:
                 print(f" ❌ (Err: {str(e)[:15]})")
                 if i < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(5) # [Modified] Increase wait time to 5s
                 continue
         
         print(" ❌ (AkShare多次重试失败, 放弃)")
@@ -279,7 +279,7 @@ class MarketFetcher:
             except Exception as e:
                 print(f" ❌ (Err: {str(e)[:15]})")
                 if i < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(5) # [Modified] Increase wait time to 5s
                 continue
 
         print(" ❌ (YFinance多次重试失败, 放弃)")
@@ -378,7 +378,8 @@ def fetch_group_data(fetcher, targets, group_name, report_start_date, end_date):
             print(f"❌ 任务 {name} 异常: {e}")
             return None, None, {'name': name, 'status': False, 'error': str(e)}
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    # [Modified] Reduce max_workers from 4 to 2 to prevent connection bans
+    with ThreadPoolExecutor(max_workers=2) as executor:
         future_to_name = {executor.submit(fetch_task, name, config): name for name, config in targets.items()}
         
         for future in as_completed(future_to_name):
