@@ -48,11 +48,13 @@ def sync_data(final_data):
     # General List (Indices, HK, US Stocks, Star50)
     general_ma = ma_lists.get("指数+个股日均线", [])
     _dispatch_ma_list(writer, general_ma)
+    _dispatch_tech_list(writer, general_ma) # [New] Dispatch Tech
     
     # Commodities List
     comm_ma = ma_lists.get("大宗商品", [])
     if comm_ma:
         writer.write_data("GOLD_MA", comm_ma, clear_existing=True)
+        writer.write_data("GOLD_TECH", comm_ma, clear_existing=True) # [New] Dispatch Tech
 
     # --- 2.2 Sync Transaction Data (30 Days) ---
     # We iterate through groups and dispatch based on known group names
@@ -132,6 +134,55 @@ def _dispatch_ma_list(writer, ma_list):
              # Default fallback: HK Tech Stock or mix
              # If it's pure HK stock not in Drug/Star list
              buckets["HK_STOCK_MA"].append(item)
+             
+    # Write Buckets
+    for key, data in buckets.items():
+        if data:
+            writer.write_data(key, data, clear_existing=True)
+
+def _dispatch_tech_list(writer, ma_list):
+    """
+    Splits the 'general' list (which contains Tech Indicators too) into specific TECH tables.
+    Also handles converting 'Signals' list to string.
+    """
+    # Buckets
+    buckets = {
+        "US_INDEX_TECH": [], "US_STOCK_TECH": [],
+        "HK_INDEX_TECH": [], "HK_STOCK_TECH": [],
+        "STAR50_INDEX_TECH": [], "STAR50_STOCK_TECH": [],
+        "DRUG_INDEX_TECH": [], "DRUG_STOCK_TECH": []
+    }
+    
+    for item in ma_list:
+        name = item.get("名称", item.get("name", ""))
+        
+        # Process Signals (Convert list to comma-string)
+        # We create a COPY to avoid modifying the original item used by MA dispatch (though safely it's fine)
+        # Actually simplest is to modify or use helper
+        tech_item = item.copy()
+        signals = tech_item.get("Signals", [])
+        if isinstance(signals, list):
+            tech_item["Signals"] = ", ".join(signals)
+            
+        # Ensure MACD/KDJ fields exist (market_core provides them, but safe check)
+        
+        # Heuristics (Same as MA)
+        if name in ["纳斯达克", "标普500", "VNM(ETF)"]:
+            buckets["US_INDEX_TECH"].append(tech_item)
+        elif name in ["恒生科技", "恒生指数"]:
+            buckets["HK_INDEX_TECH"].append(tech_item)
+        elif "科创50" in name and "ETF" in name:
+            buckets["STAR50_INDEX_TECH"].append(tech_item)
+        elif name == "港股创新药ETF":
+             buckets["DRUG_INDEX_TECH"].append(tech_item)
+        elif _is_us_stock(name):
+            buckets["US_STOCK_TECH"].append(tech_item)
+        elif _is_hk_drug(name):
+             buckets["DRUG_STOCK_TECH"].append(tech_item)
+        elif _is_star50_stock(name):
+             buckets["STAR50_STOCK_TECH"].append(tech_item)
+        else:
+             buckets["HK_STOCK_TECH"].append(tech_item)
              
     # Write Buckets
     for key, data in buckets.items():
