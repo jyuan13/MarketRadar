@@ -21,6 +21,8 @@ import utils
 import scrape_economy_selenium
 # 引入 fetch_data_core 以直接调用新功能
 import fetch_data_core
+# [新增] 引入飞书分发器
+import feishu_dispatcher
 
 OUTPUT_FILENAME = "MarketRadar_Report.json"
 LOG_FILENAME = "market_data_status.txt"
@@ -434,6 +436,14 @@ def main(period_tag=None):
             MarketRadar.send_email(email_subject, email_body, attachments)
         except Exception as e:
             print(f"⚠️ 邮件发送跳过或失败: {e}")
+            
+    # [Step 6] 飞书数据同步 (新增)
+    print(f"\n[Step 6] 飞书数据同步...")
+    try:
+        feishu_dispatcher.sync_data(final_data)
+    except Exception as e:
+        print(f"❌ 飞书同步失败: {e}")
+
 
     print(f"\n✨ 任务完成，耗时: {time.time() - start_time:.2f} 秒")
 
