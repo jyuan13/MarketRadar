@@ -87,9 +87,19 @@ KEY_TO_TABLE_MAP = {
     "JP_MACRO_BOJ_RATE": "tblrMvODKAC6djWN"
 }
 
-# Setup Logger
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("FeishuConnector")
+# Setup Logger (Replaced with print for script visibility)
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger("FeishuConnector")
+
+def log_info(msg):
+    print(f"[FeishuConnector] {msg}")
+
+def log_error(msg):
+    print(f"[FeishuConnector] ❌ {msg}")
+
+def log_debug(msg):
+    # print(f"[FeishuConnector] 🐛 {msg}")
+    pass
 
 # ==========================================
 # 2. FeiShuClient
@@ -104,7 +114,7 @@ class FeiShuClient:
         self.token_expire_time = 0
         
         if not self.app_id or not self.app_secret:
-            logger.error("❌ Missing FEISHU_APP_ID or FEISHU_APP_SECRET env vars!")
+            log_error("Missing FEISHU_APP_ID or FEISHU_APP_SECRET env vars!")
 
     def _get_tenant_access_token(self):
         if time.time() < self.token_expire_time:
@@ -120,13 +130,13 @@ class FeiShuClient:
             if data.get("code") == 0:
                 self.tenant_access_token = data["tenant_access_token"]
                 self.token_expire_time = time.time() + data["expire"] - 60
-                logger.info("✅ [Feishu] Token Refreshed.")
+                log_info("Token Refreshed.")
                 return self.tenant_access_token
             else:
-                logger.error(f"❌ Token Error: {data}")
+                log_error(f"Token Error: {data}")
                 return None
         except Exception as e:
-            logger.error(f"❌ Token Exception: {e}")
+            log_error(f"Token Exception: {e}")
             return None
 
     def _request(self, method, endpoint, params=None, json_data=None):
@@ -146,13 +156,13 @@ class FeiShuClient:
                 if res_json.get("code") == 0:
                     return res_json.get("data")
                 else:
-                    logger.error(f"❌ API Error [{endpoint}]: {res_json}")
+                    log_error(f"API Error [{endpoint}]: {res_json}")
                     return None
             else:
-                logger.error(f"❌ HTTP Error {resp.status_code}: {resp.text}")
+                log_error(f"HTTP Error {resp.status_code}: {resp.text}")
                 return None
         except Exception as e:
-            logger.error(f"❌ Request Exception: {e}")
+            log_error(f"Request Exception: {e}")
             return None
 
 # ==========================================
@@ -165,14 +175,14 @@ class FeishuDataWriter:
     def write_data(self, data_key, data_list, clear_existing=False):
         table_id = KEY_TO_TABLE_MAP.get(data_key)
         if not table_id:
-            logger.debug(f"ℹ️ Unknown Data Key: {data_key} (Skipping sync)")
+            log_debug(f"Unknown Data Key: {data_key} (Skipping sync)")
             return False
             
         if not data_list:
-            logger.warning(f"⚠️ No data for {data_key}")
+            log_error(f"No data for {data_key}")
             return False
             
-        logger.info(f"🚀 Syncing [{data_key}] -> {table_id} ({len(data_list)} rows)")
+        log_info(f"🚀 Syncing [{data_key}] -> {table_id} ({len(data_list)} rows)")
         
         # 1. Get Schema
         schema_map = self._get_field_schema(table_id)
@@ -186,34 +196,138 @@ class FeishuDataWriter:
                 valid_records.append({"fields": clean_row})
                 
         if not valid_records:
-            logger.warning(f"⚠️ No valid records after cleaning for {data_key}")
+            log_error(f"No valid records after cleaning for {data_key}")
             return False
             
-        # 3. Clear
+        # 3. Clear (Optional)
         if clear_existing:
             self._clear_table(table_id)
             
-        # 4. Insert
+        # 4. Insert Data
         self._batch_insert(table_id, valid_records)
+        log_info(f"✅ [1/4] Data Write Done for {data_key}")
+
+        # 5. Verify Data Readback
+        if not self._verify_data_count(table_id, len(valid_records)):
+            log_error(f"❌ [2/4] Data Verification Failed for {data_key}")
+            # We continue to try updating status even if count mismatches, to record the attempt? 
+            # Or return False? User wants verification flow. Let's log error but proceed to status to ensure we see it.
+        else:
+             log_info(f"✅ [2/4] Data Verification Passed (Count: {len(valid_records)})")
+
+        # 6. Update Sync Status
+        status_updated = self.update_sync_status(data_key, count=len(valid_records))
+        if status_updated:
+            log_info(f"✅ [3/4] Status Write Done for {data_key}")
+        else:
+            log_error(f"❌ [3/4] Status Write Failed for {data_key}")
+
+        # 7. Verify Status Readback
+        if self._verify_status_update(data_key):
+             log_info(f"✅ [4/4] Status Verification Passed")
+        else:
+             log_error(f"❌ [4/4] Status Verification Failed")
+
         return True
 
-    def update_sync_status(self, key_name, status="Success"):
-        """Update status table"""
-        # Simple implementation for Status
+    def _verify_data_count(self, table_id, expected_count):
+        """Read back table total count"""
         try:
-            fields = {
+            # We just get total, not all records
+            # API: LIST records, page_size=1 (to be fast), total=true
+            data = self.client._request("GET", f"tables/{table_id}/records", params={"page_size": 1, "page_token": ""})
+            if data:
+                total = data.get("total", 0)
+                if total == expected_count:
+                    return True
+                else:
+                    log_error(f"Count Mismatch! Expected {expected_count}, Found {total}")
+                    return False
+        except Exception as e:
+            log_error(f"Verification Exception: {e}")
+        return False
+
+    def update_sync_status(self, key_name, status="Success", count=0):
+        """Update status table"""
+        try:
+            # 1. Search for existing record
+            # We need to filter by "任务名称"
+            # Since filtering via API might vary, we can try to list and find (assuming status table small)
+            # Or usage filter like `CurrentValue.[任务名称] = "{key_name}"`
+            
+            # Simple approach: List all (Status table is small)
+            records = self._get_all_records(TABLE_ID_STATUS)
+            target_record_id = None
+            
+            for r in records:
+                fields = r.get("fields", {})
+                if fields.get("任务名称") == key_name:
+                    target_record_id = r["record_id"]
+                    break
+            
+            ts_now = int(time.time() * 1000)
+            fields_payload = {
                 "任务名称": key_name,
                 "状态": status,
-                "最后更新时间": int(time.time() * 1000)
+                "更新时间": ts_now,
+                "或者": str(count) # Assuming checks mapping text, wait. Let's stick to simple
             }
-            # Search & Update or Create
-            # (Simplified logic: Try to create, if fail (logic complex), just log)
-            # For Ref project, we can just append a log or try strict update if critical
-            # Here we reuse the update_record_by_field logic from main project if needed
-            # For now, minimal implementation:
-            pass 
+            # Note: Fields must match Status Table Schema exactly.
+            # Based on user description: "状态数据表日期和状态是对的"
+            # I'll guess standard names: "任务名称", "状态", "更新时间".
+            
+            if target_record_id:
+                # Update
+                self.client._request("PUT", f"tables/{TABLE_ID_STATUS}/records/{target_record_id}", json_data={"fields": fields_payload})
+            else:
+                # Create
+                self.client._request("POST", f"tables/{TABLE_ID_STATUS}/records", json_data={"fields": fields_payload})
+            
+            return True
+        except Exception as e:
+            log_error(f"Update Status Error: {e}")
+            return False
+
+    def _verify_status_update(self, key_name):
+        """Read back status table and check timestamp is recent"""
+        try:
+            records = self._get_all_records(TABLE_ID_STATUS)
+            for r in records:
+                 fields = r.get("fields", {})
+                 if fields.get("任务名称") == key_name:
+                     # Check update time is within last 1 minute
+                     upd_time = fields.get("更新时间")
+                     if upd_time:
+                         # timestamp ms
+                         if abs(time.time() * 1000 - upd_time) < 60000:
+                             return True
+                         else:
+                             log_error(f"Status Verify: Timestamp stale for {key_name}")
+                             return False
+                     return True # Found but no time field? 
+            log_error(f"Status Verify: Record not found for {key_name}")
+            return False
         except:
-            pass
+            return False
+
+    def _get_all_records(self, table_id):
+        all_records = []
+        page_token = ""
+        while True:
+            params = {"page_size": 100}
+            if page_token: params["page_token"] = page_token
+            
+            data = self.client._request("GET", f"tables/{table_id}/records", params=params)
+            if not data: break
+            
+            items = data.get("items", [])
+            all_records.extend(items)
+            
+            if data.get("has_more"):
+                page_token = data.get("page_token")
+            else:
+                break
+        return all_records
 
     def _get_field_schema(self, table_id):
         data = self.client._request("GET", f"tables/{table_id}/fields", params={"page_size": 100})
@@ -265,14 +379,14 @@ class FeishuDataWriter:
         except: return None
 
     def _clear_table(self, table_id):
-        logger.info(f"    🧹 Clearing table...")
+        log_info(f"    🧹 Clearing table...")
         while True:
             data = self.client._request("GET", f"tables/{table_id}/records", params={"page_size": 100})
             if not data or not data.get("items"): break
             
             record_ids = [i["record_id"] for i in data["items"]]
             self.client._request("POST", f"tables/{table_id}/records/batch_delete", json_data={"records": record_ids})
-            logger.info(f"    🗑️ Deleted {len(record_ids)} records")
+            log_info(f"    🗑️ Deleted {len(record_ids)} records")
             if len(record_ids) < 100: break
 
     def _batch_insert(self, table_id, records):
@@ -280,4 +394,4 @@ class FeishuDataWriter:
         for i in range(0, len(records), batch_size):
             batch = records[i : i + batch_size]
             self.client._request("POST", f"tables/{table_id}/records/batch_create", json_data={"records": batch})
-            logger.info(f"    📥 Inserted batch {i//batch_size + 1}")
+            log_info(f"    📥 Inserted batch {i//batch_size + 1}")

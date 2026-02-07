@@ -6,13 +6,13 @@ Routes MarketRadar-Original data structure to Feishu Tables.
 import logging
 from feishu_connector import FeishuDataWriter
 
-logger = logging.getLogger("FeishuDispatcher")
+# logger = logging.getLogger("FeishuDispatcher")
 
 def sync_data(final_data):
     """
     Main entry point to sync the 'final_data' dict from main.py to Feishu.
     """
-    logger.info("⚡ Starting Feishu Sync Dispatch...")
+    print("⚡ Starting Feishu Sync Dispatch... (Debug Mode)")
     writer = FeishuDataWriter()
     
     # ==========================================
@@ -62,7 +62,7 @@ def sync_data(final_data):
     for group_name, stocks_dict in klines_groups.items():
         _dispatch_transaction_group(writer, group_name, stocks_dict)
         
-    logger.info("✨ Feishu Sync Complete!")
+    print("✨ Feishu Sync Complete!")
 
 
 def _sync_macro_section(writer, data_dict, prefix):
