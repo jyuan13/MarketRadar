@@ -28,5 +28,4 @@ jobs:
       run: |
         # Use simple python path since we are in root of repo
         # The script is in Ref/Bace_Project/MarketRadar-Original/
-        cd Ref/Bace_Project/MarketRadar-Original/
         python test_feishu_write.py
